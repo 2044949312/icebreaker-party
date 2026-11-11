@@ -7,7 +7,8 @@ const BASE = process.env.BASE ?? 'http://localhost:8787'
 async function j(pathname, body) {
   const res = await fetch(BASE + pathname, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: { 'content-type': 'application/json' },
+    // 浏览器同源 POST 一定带 Origin，Sites 网关会拦掉没有 Origin 的写请求
+    headers: { 'content-type': 'application/json', origin: new URL(BASE).origin },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))

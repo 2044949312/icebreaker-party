@@ -38,7 +38,7 @@ export function RefereeConsole({
     const pending = queue.filter((q) => q.answer === 'pending')
     const declared = pub.declaredBy && !pub.solved
     return (
-      <div className="panel" style={{ borderColor: 'rgba(255,93,115,.4)' }}>
+      <div className="panel" style={{ borderColor: 'rgba(207,63,63,.3)' }}>
         <div className="h">裁判台 · 海龟汤</div>
         <p className="notice" style={{ marginBottom: 12 }}>
           汤底只在这个面板上，别把大屏投出去。
@@ -99,7 +99,7 @@ export function RefereeConsole({
   if (view.gameId === 'mime') {
     if (view.phase !== 'run') return null
     return (
-      <div className="panel" style={{ borderColor: 'rgba(255,93,115,.4)' }}>
+      <div className="panel" style={{ borderColor: 'rgba(207,63,63,.3)' }}>
         <div className="h">裁判台 · 你比我猜</div>
         {info.word && (
           <div className="bigword" style={{ marginBottom: 12, fontSize: 30 }}>
@@ -133,7 +133,7 @@ export function RefereeConsole({
       view.gameId === 'spy' ? view.phase === 'vote' : view.phase === 'run'
     if (!eligible) return null
     return (
-      <div className="panel" style={{ borderColor: 'rgba(255,93,115,.4)' }}>
+      <div className="panel" style={{ borderColor: 'rgba(207,63,63,.3)' }}>
         <div className="h">裁判台 · 现场判定</div>
         <p className="notice" style={{ marginBottom: 10 }}>
           {view.gameId === 'spy'

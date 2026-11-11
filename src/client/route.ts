@@ -8,7 +8,9 @@ export type Route =
   | { name: 'watch'; code: string }
 
 export function parse(): Route {
-  const path = location.pathname.replace(/\/+$/, '') || '/'
+  // 静态托管没有目录索引，深层地址一律落在 /join.html 这样的真实文件上，
+  // 但本机 dev 和旧链接给的是 /join，两种写法都要认。
+  const path = (location.pathname.replace(/\.html$/, '').replace(/\/+$/, '') || '/') as string
   const q = new URLSearchParams(location.search)
   const code = (q.get('c') ?? '').toUpperCase()
   if (path === '/join') return { name: 'join', code }
@@ -50,6 +52,13 @@ export function saveToken(code: string, token: string) {
   }
 }
 
-export const joinHref = (code: string) => `${location.origin}/join?c=${code.toUpperCase()}`
+export const joinHref = (code: string) => `${location.origin}/join.html?c=${code.toUpperCase()}`
 
-export const hostHref = (code: string) => `/host?c=${code.toUpperCase()}`
+export const hostHref = (code: string) => `/host.html?c=${code.toUpperCase()}`
+
+/** 下面两个是给「别的设备」看的地址，所以用服务端算出来的可访问 base */
+export const shareJoinHref = (code: string, base: string | null) =>
+  `${base ?? location.origin}/join.html?c=${code.toUpperCase()}`
+
+export const shareHostHref = (code: string, base: string | null) =>
+  `${base ?? location.origin}/host.html?c=${code.toUpperCase()}`

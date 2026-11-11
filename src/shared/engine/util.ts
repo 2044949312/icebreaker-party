@@ -53,7 +53,7 @@ export function addScore(room: Room, id: string, delta: number) {
 export const secondsLeft = (room: Room, now: number) =>
   room.deadlineAt == null ? null : Math.max(0, Math.ceil((room.deadlineAt - now) / 1000))
 
-export function ev(room: Room, kind: 'info' | 'judge' | 'score' | 'leave', text: string) {
+export function ev(room: Room, kind: 'info' | 'judge' | 'score' | 'join', text: string) {
   room.seq += 1
   room.events.push({ seq: room.seq, at: Date.now(), kind, text })
   if (room.events.length > 60) room.events.splice(0, room.events.length - 60)

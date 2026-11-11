@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { joinRoom } from '../api'
 import { go, saveToken } from '../route'
+import { ROOM_CODE_LENGTH } from '../../shared/types'
 
 export function Join({ initialCode }: { initialCode: string }) {
-  const [code, setCode] = useState(initialCode.slice(0, 4))
+  const [code, setCode] = useState(initialCode.slice(0, ROOM_CODE_LENGTH))
   const [name, setName] = useState(() => localStorage.getItem('icebreaker.name') ?? '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const submit = async () => {
-    if (code.length !== 4) return setErr('房间号是 4 位，看看大屏上的方块数字')
+    if (code.length !== ROOM_CODE_LENGTH)
+      return setErr(`房间号是 ${ROOM_CODE_LENGTH} 位，看看大屏上的方块数字`)
     if (!name.trim()) return setErr('起个名字，大家才知道谁是谁')
     setBusy(true)
     setErr(null)
@@ -17,7 +19,7 @@ export function Join({ initialCode }: { initialCode: string }) {
       const res = await joinRoom(code.toUpperCase(), name.trim())
       localStorage.setItem('icebreaker.name', name.trim())
       saveToken(res.code, res.token)
-      go(`/p?c=${res.code}`)
+      go(`/p.html?c=${res.code}`)
     } catch (e: any) {
       setErr(e?.message ?? '进不去这个房间')
       setBusy(false)
@@ -31,7 +33,7 @@ export function Join({ initialCode }: { initialCode: string }) {
           <p className="kicker">JOIN THE ROOM</p>
           <h1 className="big">加入房间</h1>
           <p className="sub">
-            照着大屏上的 4 位房间号填。手机只需要这一个网页，什么都不用装。
+            照着大屏上的 {ROOM_CODE_LENGTH} 位房间号填。手机只需要这一个网页，什么都不用装。
           </p>
 
           <div className="card" style={{ width: '100%', marginTop: 20 }}>
@@ -41,10 +43,15 @@ export function Join({ initialCode }: { initialCode: string }) {
               value={code}
               inputMode="text"
               autoCapitalize="characters"
-              maxLength={4}
-              placeholder="————"
+              maxLength={ROOM_CODE_LENGTH}
+              placeholder={'—'.repeat(ROOM_CODE_LENGTH)}
               onChange={(e) => {
-                setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))
+                setCode(
+                  e.target.value
+                    .toUpperCase()
+                    .replace(/[^A-Z0-9]/g, '')
+                    .slice(0, ROOM_CODE_LENGTH),
+                )
                 setErr(null)
               }}
             />
@@ -72,7 +79,7 @@ export function Join({ initialCode }: { initialCode: string }) {
 
           <p className="notice center" style={{ marginTop: 18 }}>
             投屏的那台设备？
-            <button className="btn link" onClick={() => go(`/host?c=${code || ''}`)}>
+            <button className="btn link" onClick={() => go(`/host.html?c=${code || ''}`)}>
               打开主持人屏
             </button>
           </p>
