@@ -1,17 +1,19 @@
 import { useState } from 'react'
 import { useRoom } from '../hooks/useRoom'
+import { useShareBase } from '../hooks/useShareBase'
 import { uiFor } from '../games'
 import { PlayerInput } from '../ui/PlayerInput'
 import { RefereeConsole } from '../ui/RefereeConsole'
 import { JudgeBadge, Seats, Ticker } from '../ui/common'
 import { Result } from './Host'
-import { go, joinHref, tokenFor } from '../route'
+import { go, joinHref, shareHostHref, tokenFor } from '../route'
 import type { RoomView } from '../../shared/types'
 
 export function Phone({ code, token }: { code: string; token: string | null }) {
   const { view, error, secondsLeft, now, run, offline } = useRoom(code, token)
   const [text, setText] = useState('')
   const [openExtra, setOpenExtra] = useState<string | null>(null)
+  const base = useShareBase()
 
   if (!token) {
     return (
@@ -193,7 +195,7 @@ export function Phone({ code, token }: { code: string; token: string | null }) {
             </div>
 
             <p className="notice center" style={{ marginTop: 16 }}>
-              投屏上的主持人页需要另一台设备打开：{joinHref(view.code).replace('/join', '/host')}
+              投屏上的主持人页需要另一台设备打开：{shareHostHref(view.code, base)}
             </p>
           </>
         )}

@@ -3,6 +3,9 @@
 export type JudgeMode = 'ai' | 'human'
 export type Role = 'host' | 'player' | 'referee' | 'watcher'
 
+/** 房间号长度：公网部署后它是进入房间的唯一门槛，所以取 6 位 */
+export const ROOM_CODE_LENGTH = 6
+
 /* ------------------------------------------------------------------ *
  * 问卷 → 推荐
  * ------------------------------------------------------------------ */
@@ -82,7 +85,7 @@ export interface Player {
 export interface RoomEvent {
   seq: number
   at: number
-  kind: 'info' | 'judge' | 'score' | 'leave'
+  kind: 'info' | 'judge' | 'score' | 'join'
   text: string
 }
 
