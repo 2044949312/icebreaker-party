@@ -66,6 +66,22 @@ export function configure(code: string, token: string, opts: { judgeMode?: 'ai' 
   })
 }
 
+/** 结算页「再选游戏」：房主把房间切到选游戏阶段 */
+export function resetToPicking(code: string, token: string) {
+  return req<{ error: string | null; view: RoomView }>(`/api/rooms/${encodeURIComponent(code)}/reset`, {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  })
+}
+
+/** 选游戏阶段房主选定下一局 */
+export function pickGame(code: string, token: string, gameId: string) {
+  return req<{ error: string | null; view: RoomView }>(`/api/rooms/${encodeURIComponent(code)}/pick`, {
+    method: 'POST',
+    body: JSON.stringify({ token, gameId }),
+  })
+}
+
 /** 别人真的能打开的地址来源；问不到就退回当前来源 */
 export async function fetchShareBase(): Promise<string | null> {
   try {

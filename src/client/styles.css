@@ -917,9 +917,14 @@ input[type='range']::-moz-range-thumb {
   transition: all calc(140ms * var(--site-motion)) ease;
 }
 
-.alt:hover {
+.alt:hover:not(:disabled) {
   border-color: rgba(10, 159, 131, 0.28);
   background: #fbfffd;
+}
+
+.alt:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
 }
 
 .alt .e {

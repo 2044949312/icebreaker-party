@@ -8,6 +8,7 @@ const living = (view: RoomView) => view.players.filter((p) => p.alive)
 
 const PHASE_CN: Record<string, string> = {
   lobby: '等待进场',
+  picking: '选游戏中',
   write: '填写中',
   ask: '提问阶段',
   ready: '准备上台',

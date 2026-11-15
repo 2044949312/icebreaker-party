@@ -11,6 +11,8 @@ import {
   joinRoute,
   metaBody,
   nextRoute,
+  pickRoute,
+  resetRoute,
   viewRoute,
   type ApiResponse,
 } from './api'
@@ -60,13 +62,15 @@ export function application(deps: { db: any; BackendError: new (code: string, st
       return json(await viewRoute(normalize(room[1]), get('token'), get('watch') === '1'))
     }
 
-    const sub = path.match(/^\/api\/rooms\/([^/]+)\/(action|next|configure)$/)
+    const sub = path.match(/^\/api\/rooms\/([^/]+)\/(action|next|configure|reset|pick)$/)
     if (sub) {
       const code = normalize(sub[1])
       const body = await readJson(request)
       const token = String(body?.token ?? '')
       if (sub[2] === 'action') return json(await actionRoute(code, token, String(body?.action ?? ''), body?.payload))
       if (sub[2] === 'next') return json(await nextRoute(code, token, !!body?.force))
+      if (sub[2] === 'reset') return json(await resetRoute(code, token))
+      if (sub[2] === 'pick') return json(await pickRoute(code, token, String(body?.gameId ?? '')))
       return json(
         await configureRoute(code, token, {
           judgeMode: body?.judgeMode === undefined ? undefined : body.judgeMode === 'human' ? 'human' : 'ai',

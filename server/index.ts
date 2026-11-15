@@ -12,6 +12,8 @@ import {
   joinRoute,
   metaBody,
   nextRoute,
+  pickRoute,
+  resetRoute,
   viewRoute,
   type ApiResponse,
 } from './api'
@@ -88,6 +90,11 @@ api.post(
             : String(req.body.refereeId),
     }),
   ),
+)
+api.post('/rooms/:code/reset', route((req) => resetRoute(code(req), String(req.body?.token ?? ''))))
+api.post(
+  '/rooms/:code/pick',
+  route((req) => pickRoute(code(req), String(req.body?.token ?? ''), String(req.body?.gameId ?? ''))),
 )
 
 // 前端统一走 Sites 的函数前缀，本机也要接住，否则构建版在本地开房间就是 404

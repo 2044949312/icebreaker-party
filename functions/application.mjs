@@ -4277,6 +4277,7 @@ function act(room, token, action, payload) {
   const engine = engineFor(room.gameId);
   const actor = room.players.find((p) => p.id === token);
   if (!engine || !actor) return "\u8EAB\u4EFD\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u52A0\u5165\u623F\u95F4";
+  if (room.phase === "picking") return "\u623F\u4E3B\u6B63\u5728\u9009\u6E38\u620F\uFF0C\u7A0D\u7B49\u4E00\u4E0B";
   if (!/^[a-zA-Z][a-zA-Z0-9]{1,24}$/.test(action)) return "\u672A\u77E5\u64CD\u4F5C";
   engine.act(room, actor, action, payload ?? {});
   touch(room);
@@ -4287,8 +4288,73 @@ function nextStep(room, token) {
   if (!engine) return "\u6E38\u620F\u5F15\u64CE\u7F3A\u5931";
   const actor = token ? room.players.find((p) => p.id === token) ?? null : null;
   if (token && !actor) return "\u8EAB\u4EFD\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u52A0\u5165\u623F\u95F4";
+  if (room.phase === "picking") return "\u623F\u4E3B\u6B63\u5728\u9009\u6E38\u620F\uFF0C\u5148\u9009\u4E00\u4E2A";
   if (room.phase === "lobby") return startRoom(room, actor?.id ?? "");
   engine.next(room, actor);
+  touch(room);
+  return null;
+}
+function resetToPicking(room, token) {
+  if (!room.players.some((p) => p.id === token && p.isHost)) return "\u53EA\u6709\u623F\u4E3B\u80FD\u6362\u6E38\u620F";
+  if (room.phase !== "over") return "\u7B49\u8FD9\u5C40\u7ED3\u7B97\u5B8C\u624D\u80FD\u6362\u6E38\u620F";
+  for (const p of room.players) {
+    p.score = 0;
+    p.alive = true;
+    p.outReason = null;
+  }
+  room.phase = "picking";
+  room.round = 0;
+  room.turn = 0;
+  room.startedAt = null;
+  room.deadlineAt = null;
+  room.pausedMs = 0;
+  room.finished = null;
+  room.seq += 1;
+  room.events.push({
+    seq: room.seq,
+    at: Date.now(),
+    kind: "info",
+    text: "\u672C\u5C40\u6536\u5DE5\u3002\u623F\u4E3B\u6B63\u5728\u6311\u4E0B\u4E00\u4E2A\u6E38\u620F\uFF0C\u5927\u5BB6\u7A0D\u7B49\u3002"
+  });
+  touch(room);
+  return null;
+}
+function pickGame(room, token, gameId) {
+  if (!room.players.some((p) => p.id === token && p.isHost)) return "\u53EA\u6709\u623F\u4E3B\u80FD\u9009\u6E38\u620F";
+  if (room.phase !== "picking") return "\u73B0\u5728\u4E0D\u5728\u9009\u6E38\u620F\u73AF\u8282";
+  const meta = GAME_BY_ID[gameId];
+  if (!meta) return "\u6CA1\u6709\u8FD9\u4E2A\u6E38\u620F";
+  const engine = engineFor(gameId);
+  if (!engine) return "\u6E38\u620F\u5F15\u64CE\u7F3A\u5931";
+  const n = room.players.length;
+  if (n < meta.minPlayers || n > meta.maxPlayers) {
+    return `${meta.name} \u8981 ${meta.minPlayers}\u2013${meta.maxPlayers} \u4EBA\uFF0C\u73B0\u5728 ${n} \u4EBA\uFF0C\u6362\u4E00\u4E2A\u5427`;
+  }
+  room.gameId = gameId;
+  room.data = {};
+  for (const p of room.players) {
+    p.score = 0;
+    p.alive = true;
+    p.outReason = null;
+  }
+  room.round = 0;
+  room.turn = 0;
+  room.startedAt = null;
+  room.deadlineAt = null;
+  room.pausedMs = 0;
+  room.finished = null;
+  if (!meta.judgeModes.includes(room.judgeMode)) room.judgeMode = meta.judgeModes[0];
+  if (room.judgeMode === "ai") room.refereeId = null;
+  else if (room.refereeId && !room.players.some((p) => p.id === room.refereeId)) room.refereeId = null;
+  room.events = [];
+  room.seq += 1;
+  room.events.push({
+    seq: room.seq,
+    at: Date.now(),
+    kind: "info",
+    text: `\u623F\u4E3B\u9009\u4E86\u300A${meta.name}\u300B\uFF0C\u4EBA\u9F50\u4E86\u5C31\u5F00\u3002`
+  });
+  engine.create(room);
   touch(room);
   return null;
 }
@@ -4428,6 +4494,19 @@ async function configureRoute(code, token, opts) {
   if (result.value.denied) return bad(403, "\u53EA\u6709\u623F\u4E3B\u80FD\u8BBE\u7F6E\u88C1\u5224");
   return ok({ error: result.value.error, view: buildView(result.room, token) });
 }
+async function resetRoute(code, token) {
+  const result = await mutateRoom(normalize(code), (room) => {
+    advance2(room, Date.now());
+    return resetToPicking(room, token);
+  });
+  if (!result.ok) return bad(404, result.reason === "conflict" ? "\u8FD9\u4E00\u6B65\u6CA1\u5199\u4E0A\uFF0C\u518D\u70B9\u4E00\u6B21" : "\u623F\u95F4\u4E0D\u5B58\u5728\u6216\u5DF2\u7ED3\u675F");
+  return ok({ error: result.value, view: buildView(result.room, token) });
+}
+async function pickRoute(code, token, gameId) {
+  const result = await mutateRoom(normalize(code), (room) => pickGame(room, token, gameId));
+  if (!result.ok) return bad(404, result.reason === "conflict" ? "\u8FD9\u4E00\u6B65\u6CA1\u5199\u4E0A\uFF0C\u518D\u70B9\u4E00\u6B21" : "\u623F\u95F4\u4E0D\u5B58\u5728\u6216\u5DF2\u7ED3\u675F");
+  return ok({ error: result.value, view: buildView(result.room, token) });
+}
 
 // server/function.ts
 var json = (r) => Response.json(r.body, { status: r.status });
@@ -4463,13 +4542,15 @@ function application(deps) {
     if (room && request.method === "GET") {
       return json(await viewRoute(normalize(room[1]), get("token"), get("watch") === "1"));
     }
-    const sub = path.match(/^\/api\/rooms\/([^/]+)\/(action|next|configure)$/);
+    const sub = path.match(/^\/api\/rooms\/([^/]+)\/(action|next|configure|reset|pick)$/);
     if (sub) {
       const code = normalize(sub[1]);
       const body = await readJson(request);
       const token = String(body?.token ?? "");
       if (sub[2] === "action") return json(await actionRoute(code, token, String(body?.action ?? ""), body?.payload));
       if (sub[2] === "next") return json(await nextRoute(code, token, !!body?.force));
+      if (sub[2] === "reset") return json(await resetRoute(code, token));
+      if (sub[2] === "pick") return json(await pickRoute(code, token, String(body?.gameId ?? "")));
       return json(
         await configureRoute(code, token, {
           judgeMode: body?.judgeMode === void 0 ? void 0 : body.judgeMode === "human" ? "human" : "ai",

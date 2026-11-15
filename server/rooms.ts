@@ -246,6 +246,7 @@ export function act(
   const engine = engineFor(room.gameId)
   const actor = room.players.find((p) => p.id === token)
   if (!engine || !actor) return '身份失效，请重新加入房间'
+  if (room.phase === 'picking') return '房主正在选游戏，稍等一下'
   if (!/^[a-zA-Z][a-zA-Z0-9]{1,24}$/.test(action)) return '未知操作'
   engine.act(room, actor, action, payload ?? {})
   touch(room)
@@ -257,8 +258,80 @@ export function nextStep(room: Room, token: string | null): string | null {
   if (!engine) return '游戏引擎缺失'
   const actor = token ? room.players.find((p) => p.id === token) ?? null : null
   if (token && !actor) return '身份失效，请重新加入房间'
+  if (room.phase === 'picking') return '房主正在选游戏，先选一个'
   if (room.phase === 'lobby') return startRoom(room, actor?.id ?? '')
   engine.next(room, actor)
+  touch(room)
+  return null
+}
+
+/** 结算后房主点「再选游戏」：清掉本局分数和倒计时，进入选游戏阶段。房号、玩家、裁判设置都保留。 */
+export function resetToPicking(room: Room, token: string): string | null {
+  if (!room.players.some((p) => p.id === token && p.isHost)) return '只有房主能换游戏'
+  if (room.phase !== 'over') return '等这局结算完才能换游戏'
+  for (const p of room.players) {
+    p.score = 0
+    p.alive = true
+    p.outReason = null
+  }
+  room.phase = 'picking'
+  room.round = 0
+  room.turn = 0
+  room.startedAt = null
+  room.deadlineAt = null
+  room.pausedMs = 0
+  room.finished = null
+  room.seq += 1
+  room.events.push({
+    seq: room.seq,
+    at: Date.now(),
+    kind: 'info',
+    text: '本局收工。房主正在挑下一个游戏，大家稍等。',
+  })
+  touch(room)
+  return null
+}
+
+/** picking 阶段房主选定下一局：换引擎、重新初始化，回到 lobby，所有端靠轮询同步。 */
+export function pickGame(room: Room, token: string, gameId: string): string | null {
+  if (!room.players.some((p) => p.id === token && p.isHost)) return '只有房主能选游戏'
+  if (room.phase !== 'picking') return '现在不在选游戏环节'
+  const meta = GAME_BY_ID[gameId]
+  if (!meta) return '没有这个游戏'
+  const engine = engineFor(gameId)
+  if (!engine) return '游戏引擎缺失'
+  const n = room.players.length
+  if (n < meta.minPlayers || n > meta.maxPlayers) {
+    return `${meta.name} 要 ${meta.minPlayers}–${meta.maxPlayers} 人，现在 ${n} 人，换一个吧`
+  }
+
+  room.gameId = gameId
+  room.data = {} as GameData
+  for (const p of room.players) {
+    p.score = 0
+    p.alive = true
+    p.outReason = null
+  }
+  room.round = 0
+  room.turn = 0
+  room.startedAt = null
+  room.deadlineAt = null
+  room.pausedMs = 0
+  room.finished = null
+  // 新游戏可能不支持原来的裁判方式（比如只支持 AI 裁判）
+  if (!meta.judgeModes.includes(room.judgeMode)) room.judgeMode = meta.judgeModes[0]
+  if (room.judgeMode === 'ai') room.refereeId = null
+  else if (room.refereeId && !room.players.some((p) => p.id === room.refereeId)) room.refereeId = null
+
+  room.events = []
+  room.seq += 1
+  room.events.push({
+    seq: room.seq,
+    at: Date.now(),
+    kind: 'info',
+    text: `房主选了《${meta.name}》，人齐了就开。`,
+  })
+  engine.create(room)
   touch(room)
   return null
 }
