@@ -59,6 +59,15 @@ function botMove(view, selfId) {
     return null
   }
 
+  // 口头描述：轮到我时点「我说完了」，引擎只推进 turn，不收文本
+  if (g === 'spy' && view.phase === 'describe' && n.input === 'none' && !n.submitted) {
+    const d = view.publicData.spy ?? {}
+    if (d.describeMode === 'oral' && (d.livingOrder ?? d.order ?? [])[view.turn] === selfId) {
+      return { action: 'describe', payload: {} }
+    }
+    return null
+  }
+
   if (n.input === 'three') return { action: 'write', payload: { statements: [one(CLAIMS), one(DESCRIPTIONS), one(LINES)], lieIndex: 1 } }
   if (n.input === 'number') {
     const m = /(\d+)\s*到\s*(\d+)/.exec(n.inputHint ?? '')
@@ -111,7 +120,7 @@ const LEAK_KEYS = {
   soup: (host) => ({ words: [host.referee?.truth].filter(Boolean), until: 'over' }),
 }
 
-async function playGame(gameId, count, judgeMode) {
+async function playGame(gameId, count, judgeMode, gameOpts) {
   const created = await j('/api/rooms', { gameId, hostName: '主持人', judgeMode, profile: profile(count) })
   const code = created.code
   const host = created.token
@@ -122,6 +131,10 @@ async function playGame(gameId, count, judgeMode) {
   }
   if (judgeMode === 'human') {
     await j(`/api/rooms/${code}/configure`, { token: host, judgeMode: 'human', refereeId: tokens[1] })
+  }
+  if (gameOpts) {
+    const r = await j(`/api/rooms/${code}/configure`, { token: host, game: gameOpts })
+    if (r.error) throw new Error(`配置被拒：${r.error}`)
   }
   await j(`/api/rooms/${code}/next`, { token: host })
 
@@ -164,8 +177,9 @@ async function playGame(gameId, count, judgeMode) {
   const scores = final.players.map((p) => `${p.name}:${p.score}`)
   const ok = final.phase === 'over' && !!final.finished
   const tag = ok ? '✓' : '✗'
+  const variant = gameOpts ? ` ${JSON.stringify(gameOpts)}` : ''
   console.log(
-    `${tag} ${gameId}(${judgeMode}) ${count}人 iters=${iter} phases=${phases.join('>') || '—'} ` +
+    `${tag} ${gameId}(${judgeMode}) ${count}人${variant} iters=${iter} phases=${phases.join('>') || '—'} ` +
       `winner=${(final.finished?.winners ?? []).map((w) => w.name).join('、') || '无'} 分=${scores.join(' ')} 事件=${final.events.length}`,
   )
   if (leaks.length) console.log('   !! 泄露:', [...new Set(leaks)].slice(0, 3).join(' / '))
@@ -173,9 +187,100 @@ async function playGame(gameId, count, judgeMode) {
   return ok && leaks.length === 0
 }
 
+/** 针对房间层的定点断言：人数上限、卧底数、配置权限、喊话白名单与节流 */
+async function checks() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(msg)
+  }
+  const open = async (gameId, count) => {
+    const c = await j('/api/rooms', { gameId, hostName: '主持人', judgeMode: 'ai', profile: profile(count) })
+    const tokens = [c.token]
+    for (let i = 1; i < count; i++) tokens.push((await j('/api/join', { code: c.code, name: '玩家' + i })).token)
+    return { code: c.code, host: c.token, tokens }
+  }
+  const view = (code, token) => j(`/api/rooms/${code}?token=${token}`).then((r) => r.view)
+  let pass = 0
+  let total = 0
+  const t = async (name, fn) => {
+    total++
+    try {
+      await fn()
+      console.log(`✓ ${name}`)
+      pass++
+    } catch (e) {
+      console.log(`✗ ${name}: ${e.message}`)
+    }
+  }
+
+  await t('8 人局自动给 2 个卧底（建房时只有房主，不能在那时候算）', async () => {
+    const r = await open('spy', 8)
+    const lobby = await view(r.code, r.host)
+    assert(lobby.publicData.spy.insiderCount === 2, `等待页预览应为 2，实际 ${lobby.publicData.spy.insiderCount}`)
+    await j(`/api/rooms/${r.code}/next`, { token: r.host })
+    const v = await view(r.code, r.host)
+    assert(v.publicData.spy.insiderCount === 2, `开局后应为 2，实际 ${v.publicData.spy.insiderCount}`)
+    assert(v.referee.insiderSeats.length === 2, `实际发词只有 ${v.referee.insiderSeats.length} 个卧底`)
+  })
+
+  await t('人数上限拦得住超员加入', async () => {
+    const r = await open('spy', 12)
+    let msg = ''
+    try {
+      await j('/api/join', { code: r.code, name: '挤进来的' })
+    } catch (e) {
+      msg = e.message
+    }
+    assert(/满了/.test(msg), `应该报房间已满，实际：${msg || '居然加进去了'}`)
+  })
+
+  await t('房主能改卧底数与描述方式，超限被拒并说明原因', async () => {
+    const r = await open('spy', 5)
+    const ok = await j(`/api/rooms/${r.code}/configure`, { token: r.host, game: { insiderPref: 2, describeMode: 'typed' } })
+    assert(ok.error === null, `配置被拒：${ok.error}`)
+    assert(ok.view.publicData.spy.insiderCount === 2, '卧底数没生效')
+    assert(ok.view.publicData.spy.describeMode === 'typed', '描述方式没生效')
+    const bad = await j(`/api/rooms/${r.code}/configure`, { token: r.host, game: { insiderPref: 4 } })
+    assert(/最多支持 3 个卧底/.test(bad.error ?? ''), `5 人局上限是 3，实际返回：${bad.error}`)
+  })
+
+  await t('非房主改配置被拒', async () => {
+    const r = await open('spy', 5)
+    let status = 0
+    try {
+      await j(`/api/rooms/${r.code}/configure`, { token: r.tokens[1], game: { insiderPref: 1 } })
+    } catch (e) {
+      status = /-> 403/.test(e.message) ? 403 : 0
+    }
+    assert(status === 403, '应该返回 403')
+  })
+
+  await t('开局之后不许再改配置', async () => {
+    const r = await open('spy', 5)
+    await j(`/api/rooms/${r.code}/next`, { token: r.host })
+    const res = await j(`/api/rooms/${r.code}/configure`, { token: r.host, game: { insiderPref: 1 } })
+    assert(/开局之后/.test(res.error ?? ''), `应该拒绝，实际：${res.error}`)
+  })
+
+  await t('喊话只收名单内的话，2 秒内重复发被吞掉', async () => {
+    const r = await open('spy', 4)
+    const say = (text) => j(`/api/rooms/${r.code}/action`, { token: r.tokens[1], action: 'say', payload: { text } })
+    const a = await say('等三分钟开')
+    assert(a.view.events.some((e) => e.kind === 'chat' && e.text.includes('等三分钟开')), '喊话没进播报')
+    const b = await say('等三分钟开')
+    assert(b.view.events.filter((e) => e.kind === 'chat').length === 1, '节流没生效')
+    const c = await say('<img src=x onerror=alert(1)>')
+    assert(c.error === '只能发列表里的话', `任意文本应被拒，实际：${c.error}`)
+  })
+
+  console.log(`房间层断言 ${pass}/${total} 通过\n`)
+  return pass === total
+}
+
 const TABLE = [
   ['spy', 6, 'ai'],
   ['spy', 6, 'human'],
+  ['spy', 6, 'ai', { describeMode: 'oral' }],
+  ['spy', 9, 'ai', { describeMode: 'oral', insiderPref: 3 }],
   ['twos', 5, 'ai'],
   ['soup', 4, 'ai'],
   ['soup', 4, 'human'],
@@ -190,14 +295,15 @@ const TABLE = [
 const wanted = process.argv.slice(2)
 let pass = 0
 let total = 0
-for (const [g, n, mode] of TABLE) {
+const checksOk = await checks()
+for (const [g, n, mode, gameOpts] of TABLE) {
   if (wanted.length && !wanted.includes(g)) continue
   total++
   try {
-    if (await playGame(g, n, mode)) pass++
+    if (await playGame(g, n, mode, gameOpts)) pass++
   } catch (err) {
     console.log(`✗ ${g}(${mode}) 抛错: ${err.message}`)
   }
 }
 console.log(`\n${pass}/${total} 通过`)
-process.exit(pass === total ? 0 : 1)
+process.exit(pass === total && checksOk ? 0 : 1)

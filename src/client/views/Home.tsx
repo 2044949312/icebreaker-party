@@ -5,6 +5,7 @@ import { GAME_BY_ID, GAMES } from '../../shared/games'
 import { recommend } from '../../shared/recommend'
 import type { Intimacy, Profile, Setting, Vibe } from '../../shared/types'
 import { gamesHref, go, hostHref, saveToken } from '../route'
+import { RecentRooms } from '../ui/RecentRooms'
 
 const VIBES: { v: Vibe; label: string; hint: string }[] = [
   { v: 'laugh', label: '爆笑', hint: '笑到缺氧，拍照留念' },
@@ -122,7 +123,7 @@ export function Home() {
         judgeMode: meta.judgeModes[0],
         profile,
       })
-      saveToken(res.code, res.token)
+      saveToken(res.code, res.token, { gameId, role: 'host' })
       go(hostHref(res.code))
     } catch (e: any) {
       setErr(e?.message ?? '开房间失败了，重试一下')
@@ -166,6 +167,10 @@ export function Home() {
             </div>
 
             <p className="notice home-note">现场只要一台设备投屏，其他人扫码加入。</p>
+
+            <div className="home-recent">
+              <RecentRooms />
+            </div>
           </div>
         </div>
       </div>

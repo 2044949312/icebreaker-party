@@ -84,6 +84,10 @@ export async function joinRoute(b: any): Promise<ApiResponse> {
   const loaded = await loadRoom(code)
   if (!loaded) return bad(404, '找不到这个房间，检查一下房间号')
   if (loaded.room.phase !== 'lobby') return bad(400, '这局已经开始了，等下一局再加入吧')
+  const meta = GAME_BY_ID[loaded.room.gameId]
+  if (meta && loaded.room.players.length >= meta.maxPlayers) {
+    return bad(400, `这个房间满了（${meta.name} 最多 ${meta.maxPlayers} 人），让房主再开一局`)
+  }
   return bad(400, '名字不太对，换一个试试')
 }
 
@@ -119,9 +123,13 @@ export async function nextRoute(code: string, token: string, force = false): Pro
 }
 
 export async function configureRoute(code: string, token: string, opts: any): Promise<ApiResponse> {
+  const game =
+    opts?.game && typeof opts.game === 'object' && !Array.isArray(opts.game)
+      ? (opts.game as Record<string, unknown>)
+      : undefined
   const result = await mutateRoom(normalize(code), (room) => {
     if (!room.players.some((p) => p.id === token && p.isHost)) return { denied: true as const, error: null }
-    return { denied: false as const, error: configureRoom(room, opts) }
+    return { denied: false as const, error: configureRoom(room, { ...opts, game }) }
   })
   if (!result.ok) return bad(404, result.reason === 'conflict' ? '这一步没写上，再点一次' : '房间不存在或已结束')
   if (result.value.denied) return bad(403, '只有房主能设置裁判')

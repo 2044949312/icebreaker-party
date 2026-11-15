@@ -314,7 +314,7 @@ function GameDetail(props: { game: GameMeta; initialCount: number; onClose: () =
         judgeMode,
         profile: profileFor(g, count),
       })
-      saveToken(res.code, res.token)
+      saveToken(res.code, res.token, { gameId: g.id, role: 'host' })
       go(hostHref(res.code))
     } catch (e: any) {
       setErr(e?.message ?? '开房间失败了，重试一下')

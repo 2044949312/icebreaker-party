@@ -31,7 +31,13 @@ export const chance = (p: number) => Math.random() < p
 
 /* ---------------------------- 房间 ---------------------------- */
 
-export const seated = (room: Room) => room.players.slice().sort((a, b) => a.seat - b.seat)
+/** 房主选择只主持（或房主本人就是真人裁判）时，不进游戏池：不发词、不排回合、不计分 */
+export const sittingOut = (room: Room, p: Player) =>
+  p.isHost &&
+  (room.hostPlays === false || (room.judgeMode === 'human' && room.refereeId === p.id))
+
+export const seated = (room: Room) =>
+  room.players.filter((p) => !sittingOut(room, p)).sort((a, b) => a.seat - b.seat)
 
 export const alive = (room: Room) => seated(room).filter((p) => p.alive)
 
@@ -53,7 +59,7 @@ export function addScore(room: Room, id: string, delta: number) {
 export const secondsLeft = (room: Room, now: number) =>
   room.deadlineAt == null ? null : Math.max(0, Math.ceil((room.deadlineAt - now) / 1000))
 
-export function ev(room: Room, kind: 'info' | 'judge' | 'score' | 'join', text: string) {
+export function ev(room: Room, kind: 'info' | 'judge' | 'score' | 'join' | 'chat', text: string) {
   room.seq += 1
   room.events.push({ seq: room.seq, at: Date.now(), kind, text })
   if (room.events.length > 60) room.events.splice(0, room.events.length - 60)

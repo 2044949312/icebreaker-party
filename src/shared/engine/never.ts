@@ -158,7 +158,7 @@ export const neverEngine: GameEngine = {
   create(room: Room) {
     const d = never(room)
     d.startScore = START_SCORE
-    for (const p of room.players) p.score = START_SCORE
+    for (const p of seated(room)) p.score = START_SCORE
     d.claims = {}
     d.order = []
     d.cursor = 0
@@ -393,7 +393,7 @@ export const neverEngine: GameEngine = {
 
   finish(room: Room): FinalResult {
     const d = never(room)
-    const ranked = rankByScore(room.players)
+    const ranked = rankByScore(seated(room))
     const top = ranked[0]
     const bottom = ranked[ranked.length - 1]
     const winners = ranked

@@ -59,7 +59,11 @@ export function sendNext(code: string, token: string) {
   })
 }
 
-export function configure(code: string, token: string, opts: { judgeMode?: 'ai' | 'human'; refereeId?: string | null }) {
+export function configure(
+  code: string,
+  token: string,
+  opts: { judgeMode?: 'ai' | 'human'; refereeId?: string | null; hostPlays?: boolean; game?: Record<string, unknown> },
+) {
   return req<{ error: string | null; view: RoomView }>(`/api/rooms/${encodeURIComponent(code)}/configure`, {
     method: 'POST',
     body: JSON.stringify({ token, ...opts }),

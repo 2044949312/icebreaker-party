@@ -398,7 +398,7 @@ export const twosEngine: GameEngine = {
 
   finish(room: Room): FinalResult {
     const d = twos(room)
-    const ranked = rankByScore(room.players)
+    const ranked = rankByScore(seated(room))
     const top = ranked[0]
     const bottom = ranked[ranked.length - 1]
     const winners = ranked

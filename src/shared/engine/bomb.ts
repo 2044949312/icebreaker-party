@@ -1,7 +1,7 @@
 import { judge, rankByScore } from '../judge'
 import type { BombData, FinalResult, Player, Room, RoomView, ViewNeeds } from '../types'
 import type { GameEngine } from './contract'
-import { addScore, byId, bomb, ev, nameOf, phase, pick, randInt, retime, shuffle } from './util'
+import { addScore, byId, bomb, ev, nameOf, phase, pick, randInt, retime, seated, shuffle } from './util'
 
 /* ----------------------------- 常量 ----------------------------- */
 
@@ -60,7 +60,7 @@ function newRound(room: Room) {
   d.low = MIN_VALUE
   d.high = MAX_VALUE
   d.history = []
-  d.order = shuffle(room.players.map((p) => p.id))
+  d.order = shuffle(seated(room).map((p) => p.id))
   d.cursor = 0
   d.loser = null
   // round 同时镜像到 room.round，大屏的「第 X 轮」标签直接读它
@@ -87,7 +87,7 @@ function advance(room: Room) {
 function awardSafe(room: Room) {
   const d = bomb(room)
   let safe = 0
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     if (p.id === d.loser) continue
     addScore(room, p.id, SAFE_POINTS)
     safe += 1
@@ -102,7 +102,7 @@ function awardSafe(room: Room) {
 /** 结算时把踩雷次数换算成正分：一轮没踩的人补得分高，踩得越多补得越少 */
 function settleBoomBonus(room: Room) {
   const d = bomb(room)
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     addScore(room, p.id, Math.max(0, d.maxRound - boomCount(d, p.id)))
   }
 }
@@ -125,7 +125,7 @@ function toOver(room: Room) {
 
 function worstBoomer(room: Room, d: BombData) {
   let target: { name: string; n: number } | null = null
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     const n = boomCount(d, p.id)
     if (n > 0 && (!target || n > target.n)) target = { name: p.name, n }
   }
@@ -133,7 +133,7 @@ function worstBoomer(room: Room, d: BombData) {
 }
 
 function boomsLine(room: Room, d: BombData) {
-  const rows = room.players
+  const rows = seated(room)
     .map((p) => ({ name: p.name, n: boomCount(d, p.id) }))
     .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name, 'zh'))
   if (!rows.length) return '没人参与报数。'
@@ -387,13 +387,13 @@ export const bombEngine: GameEngine = {
 
   finish(room: Room): FinalResult {
     const d = bomb(room)
-    const ranked = rankByScore(room.players)
+    const ranked = rankByScore(seated(room))
     const top = ranked[0]?.rank ?? 0
     const winners = ranked
       .filter((r) => r.rank === top)
       .map((r) => ({ name: r.player.name, score: r.player.score }))
 
-    const safest = room.players
+    const safest = seated(room)
       .map((p) => ({ name: p.name, n: boomCount(d, p.id) }))
       .sort((a, b) => a.n - b.n)[0]
     const worst = worstBoomer(room, d)

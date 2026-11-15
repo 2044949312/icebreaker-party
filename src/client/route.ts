@@ -29,8 +29,17 @@ export function go(to: string, replace = false) {
 }
 
 const KEY = 'icebreaker.creds'
+const RECENT_KEY = 'icebreaker.recent'
+const RECENT_MAX = 6
 
 type Creds = Record<string, string>
+
+export interface RecentRoom {
+  code: string
+  at: number
+  gameId: string | null
+  role: 'host' | 'player'
+}
 
 function read(): Creds {
   try {
@@ -44,13 +53,42 @@ export function tokenFor(code: string): string | null {
   return read()[code.toUpperCase()] ?? null
 }
 
-export function saveToken(code: string, token: string) {
+export function saveToken(code: string, token: string, meta?: { gameId?: string; role?: 'host' | 'player' }) {
+  const key = code.toUpperCase()
   const all = read()
-  all[code.toUpperCase()] = token
+  all[key] = token
+  const recent: RecentRoom[] = [
+    { code: key, at: Date.now(), gameId: meta?.gameId ?? null, role: meta?.role ?? 'player' },
+    ...recentRooms().filter((r) => r.code !== key),
+  ].slice(0, RECENT_MAX)
   try {
     localStorage.setItem(KEY, JSON.stringify(all))
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent))
   } catch {
     /* 隐私模式下写不进去，不影响本次会话 */
+  }
+}
+
+export function recentRooms(): RecentRoom[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
+    if (!Array.isArray(raw)) return []
+    return raw.filter((r) => r && typeof r.code === 'string' && typeof r.at === 'number')
+  } catch {
+    return []
+  }
+}
+
+/** 房间 3 小时就被服务端清掉了，列表里得能手动扔掉死房间 */
+export function forgetRoom(code: string) {
+  const key = code.toUpperCase()
+  const all = read()
+  delete all[key]
+  try {
+    localStorage.setItem(KEY, JSON.stringify(all))
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recentRooms().filter((r) => r.code !== key)))
+  } catch {
+    /* 同上 */
   }
 }
 
