@@ -1,5 +1,8 @@
 import type { Profile, RoomView } from '../shared/types'
 
+/** 本机和 Sites 共用这一个前缀，本地 Express 也挂了同一套路由，产物不再分两种 */
+const API = '/functions/v1/app'
+
 export const LS = {
   token: 'icebreaker.token',
   code: 'icebreaker.code',
@@ -7,7 +10,7 @@ export const LS = {
 }
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(API + url, {
     headers: { 'content-type': 'application/json' },
     ...init,
   })
@@ -63,4 +66,12 @@ export function configure(code: string, token: string, opts: { judgeMode?: 'ai' 
   })
 }
 
-export const qrUrl = (joinHref: string) => `/api/qr?t=${encodeURIComponent(joinHref)}`
+/** 别人真的能打开的地址来源；问不到就退回当前来源 */
+export async function fetchShareBase(): Promise<string | null> {
+  try {
+    const { base } = await req<{ base: string }>('/api/meta')
+    return /^https?:\/\/[^/]+$/.test(base) ? base : null
+  } catch {
+    return null
+  }
+}

@@ -1,5 +1,30 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import QRCode from 'qrcode'
 import type { Player, RoomEvent, RoomView } from '../../shared/types'
+
+export function QrImage({ text, size = 150 }: { text: string; size?: number }) {
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    QRCode.toDataURL(text, {
+      width: size,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#12271f', light: '#ffffff' },
+    })
+      .then((d) => {
+        if (alive) setSrc(d)
+      })
+      .catch(() => {
+        if (alive) setSrc(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [text, size])
+  if (!src) return <span className="spin" />
+  return <img src={src} alt={`扫码加入：${text}`} width={size} height={size} />
+}
 
 export function Timer({ view, now, secondsLeft }: { view: RoomView; now: number; secondsLeft: number | null }) {
   const maxRef = useRef<Record<string, number>>({})
@@ -41,7 +66,7 @@ export function Seats({
 }) {
   const referee = view.refereeId
   return (
-    <div className="seats" style={compact ? { gridTemplateColumns: 'repeat(auto-fill,minmax(112px,1fr))' } : undefined}>
+    <div className="seats" style={compact ? { gridTemplateColumns: 'repeat(auto-fill,minmax(132px,1fr))' } : undefined}>
       {view.players.map((p) => {
         const isTurn = turnId && p.id === turnId
         return (

@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { configure, qrUrl } from '../api'
+import { configure } from '../api'
 import { useRoom } from '../hooks/useRoom'
+import { useShareBase } from '../hooks/useShareBase'
 import { uiFor } from '../games'
-import { JudgeBadge, Seats, Scoreboard, Ticker, Timer } from '../ui/common'
+import { JudgeBadge, QrImage, Seats, Scoreboard, Ticker, Timer } from '../ui/common'
 import { StageView } from '../ui/StageView'
 import { RefereeConsole } from '../ui/RefereeConsole'
-import { joinHref } from '../route'
+import { joinHref, shareJoinHref } from '../route'
 import type { RoomView } from '../../shared/types'
 
 export function Host({ code, token, watch }: { code: string; token: string | null; watch?: boolean }) {
@@ -130,7 +131,8 @@ function Lobby({
 }) {
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const href = joinHref(view.code)
+  const base = useShareBase()
+  const href = shareJoinHref(view.code, base)
   const canStart = view.players.length >= view.meta.minPlayers
   const needReferee = view.judgeMode === 'human' && !view.refereeId
   const aiOnly = view.meta.judgeModes.length === 1 && view.meta.judgeModes[0] === 'ai'
@@ -156,7 +158,7 @@ function Lobby({
       <div className="stage-main">
         <div className="card accent" style={{ display: 'flex', gap: 22, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="qr">
-            <img src={qrUrl(href)} alt={`扫码加入房间 ${view.code}`} width={150} height={150} />
+            <QrImage text={href} />
           </div>
           <div style={{ minWidth: 220 }}>
             <div className="dim" style={{ letterSpacing: '0.2em' }}>
@@ -173,6 +175,7 @@ function Lobby({
             </a>
             <p className="notice" style={{ marginTop: 10 }}>
               扫上面的码，或者手动输入网址，然后填房间号。
+              {base && new URL(base).host !== location.host && '手机要和这台电脑连同一个 WiFi 才打得开这个地址。'}
             </p>
           </div>
         </div>
@@ -292,7 +295,7 @@ function Result({ view }: { view: RoomView }) {
   const f = view.finished
   if (!f) return null
   return (
-    <div className="panel" style={{ borderColor: 'rgba(255,194,71,.45)' }}>
+    <div className="panel" style={{ borderColor: 'rgba(10,159,131,.38)' }}>
       <div className="h">结算</div>
       <h2 style={{ marginBottom: 8 }}>{f.title}</h2>
       {f.lines.map((l, i) => (

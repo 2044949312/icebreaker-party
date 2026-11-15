@@ -1,10 +1,15 @@
 import type { GameData, Profile, Room, RoomView, Player } from '../src/shared/types'
+import { ROOM_CODE_LENGTH } from '../src/shared/types'
 import { GAME_BY_ID } from '../src/shared/games'
 import { engineFor } from '../src/shared/engine'
+import { memoryStore, ROOM_TTL_MS, type Loaded, type RoomStore } from './store'
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-const ROOM_TTL_MS = 3 * 60 * 60 * 1000
+const TOKEN_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789'
 const PLAYER_OFFLINE_MS = 45_000
+/** 在线状态写库的最小间隔，避免每次轮询都产生一次写 */
+const PRESENCE_WRITE_MS = 10_000
+const CAS_ATTEMPTS = 4
 
 export interface CreateInput {
   profile: Profile
@@ -13,32 +18,97 @@ export interface CreateInput {
   hostName: string
 }
 
-const rooms = new Map<string, Room>()
-const tokens = new Map<string, string>()
+let store: RoomStore = memoryStore()
 
-function makeCode() {
-  for (let attempt = 0; attempt < 40; attempt++) {
-    let code = ''
-    for (let i = 0; i < 4; i++) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]
-    if (!rooms.has(code)) return code
+/** 换房间存储：本机 Express 用内存，Sites Function 用数据库 */
+export function useRoomStore(next: RoomStore) {
+  store = next
+}
+
+/** 房间号和玩家令牌在公网部署后就是访问凭证，不能用 Math.random */
+function randomPick(alphabet: string, length: number) {
+  const limit = 256 - (256 % alphabet.length)
+  let out = ''
+  while (out.length < length) {
+    const bytes = new Uint8Array(length * 2)
+    crypto.getRandomValues(bytes)
+    for (const b of bytes) {
+      if (out.length >= length) break
+      if (b < limit) out += alphabet[b % alphabet.length]
+    }
   }
-  return Date.now().toString(36).slice(-4).toUpperCase()
+  return out
 }
 
-const makeToken = () =>
-  Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
-
-export function codeOf(token: string): string | null {
-  return tokens.get(token) ?? null
+async function makeCode() {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const code = randomPick(CODE_CHARS, ROOM_CODE_LENGTH)
+    if (!(await store.load(code))) return code
+  }
+  return randomPick(CODE_CHARS, ROOM_CODE_LENGTH)
 }
 
-export function createRoom(input: CreateInput): { room: Room; host: Player } {
+const makeToken = () => randomPick(TOKEN_CHARS, 32)
+
+export function normalize(code: string) {
+  return String(code ?? '').trim().toUpperCase().slice(0, ROOM_CODE_LENGTH)
+}
+
+export function sanitizeName(name: unknown) {
+  return String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 12)
+}
+
+export type MutateResult<T> =
+  | { ok: true; value: T; room: Room }
+  | { ok: false; reason: 'not_found' | 'conflict' }
+
+/** 读房间 → 改 → 按 seq 写回；写回撞车就重读再来 */
+export async function mutateRoom<T>(code: string, fn: (room: Room) => T): Promise<MutateResult<T>> {
+  for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
+    const loaded = await store.load(code)
+    if (!loaded) return { ok: false, reason: 'not_found' }
+    const value = fn(loaded.room)
+    if (JSON.stringify(loaded.room) === loaded.json) return { ok: true, value, room: loaded.room }
+    // 版本号必须前进，否则只改 lastSeen 这类不动 seq 的写入躲得过并发检查
+    loaded.room.seq = Math.max(loaded.room.seq, loaded.expectedSeq + 1)
+    if (await store.commit(loaded, loaded.room)) return { ok: true, value, room: loaded.room }
+  }
+  return { ok: false, reason: 'conflict' }
+}
+
+/** 每次请求顺带把时间往前推一格，替代常驻进程里的 setInterval */
+export function advance(room: Room, now: number) {
+  const engine = engineFor(room.gameId)
+  if (!engine) return
+  try {
+    engine.tick(room, now)
+  } catch (err) {
+    console.error('[tick]', room.code, room.gameId, err)
+    room.seq += 1
+    room.events.push({ seq: room.seq, at: now, kind: 'info', text: '裁判这边卡了一下，按「下一步」继续。' })
+  }
+  if (room.phase === 'over' && !room.finished) {
+    try {
+      room.finished = engine.finish(room)
+    } catch (err) {
+      console.error('[finish]', room.code, err)
+      room.finished = {
+        title: '本局结束',
+        lines: [],
+        winners: [],
+        verdict: '结算时裁判打了个盹，分数以现场记忆为准。',
+      }
+    }
+  }
+}
+
+export async function createRoom(input: CreateInput): Promise<{ room: Room; host: Player }> {
   const meta = GAME_BY_ID[input.gameId]
   if (!meta) throw new Error('unknown game')
   const engine = engineFor(input.gameId)
   if (!engine) throw new Error('engine missing')
 
-  const code = makeCode()
+  const code = await makeCode()
   const now = Date.now()
   const host: Player = {
     id: makeToken(),
@@ -73,60 +143,51 @@ export function createRoom(input: CreateInput): { room: Room; host: Player } {
     finished: null,
   }
 
-  tokens.set(host.id, code)
-  rooms.set(code, room)
   engine.create(room)
   touch(room)
+  if (!(await store.insert(room))) throw new Error('code taken')
   return { room, host }
 }
 
-export function getRoom(code: string): Room | null {
-  return rooms.get(normalize(code)) ?? null
-}
+export const loadRoom = (code: string): Promise<Loaded | null> => store.load(normalize(code))
 
-export function normalize(code: string) {
-  return String(code ?? '').trim().toUpperCase().slice(0, 6)
-}
-
-export function sanitizeName(name: unknown) {
-  return String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 12)
-}
-
-export function joinRoom(code: string, name: string): { room: Room; player: Player } | null {
-  const room = getRoom(code)
-  if (!room) return null
-  if (room.phase !== 'lobby') return null
-
+export async function joinRoom(
+  code: string,
+  name: string,
+): Promise<{ room: Room; player: Player } | null> {
   const clean = sanitizeName(name)
   if (!clean) return null
+  const result = await mutateRoom(normalize(code), (room) => {
+    if (room.phase !== 'lobby') return null
 
-  const taken = new Set(room.players.map((p) => p.name))
-  let finalName = clean
-  let n = 2
-  while (taken.has(finalName)) finalName = `${clean}${n++}`
+    const taken = new Set(room.players.map((p) => p.name))
+    let finalName = clean
+    let n = 2
+    while (taken.has(finalName)) finalName = `${clean}${n++}`
 
-  const player: Player = {
-    id: makeToken(),
-    name: finalName,
-    seat: room.players.length + 1,
-    isHost: false,
-    connected: true,
-    lastSeen: Date.now(),
-    score: 0,
-    alive: true,
-    outReason: null,
-  }
-  room.players.push(player)
-  tokens.set(player.id, room.code)
-  room.seq += 1
-  room.events.push({
-    seq: room.seq,
-    at: Date.now(),
-    kind: 'leave',
-    text: `${player.name} 加入，现在 ${room.players.length} 个人`,
+    const player: Player = {
+      id: makeToken(),
+      name: finalName,
+      seat: room.players.length + 1,
+      isHost: false,
+      connected: true,
+      lastSeen: Date.now(),
+      score: 0,
+      alive: true,
+      outReason: null,
+    }
+    room.players.push(player)
+    room.seq += 1
+    room.events.push({
+      seq: room.seq,
+      at: Date.now(),
+      kind: 'join',
+      text: `${player.name} 加入，现在 ${room.players.length} 个人`,
+    })
+    touch(room)
+    return { room, player }
   })
-  touch(room)
-  return { room, player }
+  return result.ok ? result.value : null
 }
 
 export function touch(room: Room) {
@@ -257,44 +318,27 @@ export function buildView(room: Room, token: string | null, asWatcher = false): 
   return view
 }
 
+/* ---------------------------- 在线状态 ---------------------------- */
+
+/** 超过 PRESENCE_WRITE_MS 才动 lastSeen，免得每次轮询都产生一次写 */
+export function markSeen(room: Room, token: string | null, now = Date.now()) {
+  if (!token) return
+  const p = room.players.find((x) => x.id === token)
+  if (!p || now - p.lastSeen < PRESENCE_WRITE_MS) return
+  p.lastSeen = now
+}
+
 /* ---------------------------- 心跳 ---------------------------- */
 
-export function tickAll(now: number) {
-  for (const room of rooms.values()) {
+/** 常驻进程用：把所有房间推一格；Serverless 走请求里的 advance() */
+export async function tickAll(now: number) {
+  for (const room of (await store.all?.()) ?? []) {
     if (now - room.updatedAt > ROOM_TTL_MS) {
-      for (const p of room.players) tokens.delete(p.id)
-      rooms.delete(room.code)
+      await store.remove(room.code)
       continue
     }
-    const engine = engineFor(room.gameId)
-    if (!engine) continue
-    try {
-      engine.tick(room, now)
-    } catch (err) {
-      console.error('[tick]', room.code, room.gameId, err)
-      room.seq += 1
-      room.events.push({
-        seq: room.seq,
-        at: now,
-        kind: 'info',
-        text: '裁判这边卡了一下，按「下一步」继续。',
-      })
-    }
-    if (room.phase === 'over' && !room.finished) {
-      try {
-        room.finished = engine.finish(room)
-      } catch (err) {
-        console.error('[finish]', room.code, err)
-        room.finished = {
-          title: '本局结束',
-          lines: [],
-          winners: [],
-          verdict: '结算时裁判打了个盹，分数以现场记忆为准。',
-        }
-      }
-      touch(room)
-    }
+    advance(room, now)
   }
 }
 
-export const roomCount = () => rooms.size
+export const roomCount = () => store.count()
