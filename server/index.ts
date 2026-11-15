@@ -86,6 +86,8 @@ api.post(
           : req.body.refereeId === null
             ? null
             : String(req.body.refereeId),
+      hostPlays: req.body?.hostPlays === undefined ? undefined : !!req.body.hostPlays,
+      game: req.body?.game,
     }),
   ),
 )

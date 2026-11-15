@@ -3,6 +3,7 @@ import { useRoom } from '../hooks/useRoom'
 import { useShareBase } from '../hooks/useShareBase'
 import { uiFor } from '../games'
 import { PlayerInput } from '../ui/PlayerInput'
+import { QuickPhrases } from '../ui/QuickPhrases'
 import { RefereeConsole } from '../ui/RefereeConsole'
 import { JudgeBadge, Seats, Ticker } from '../ui/common'
 import { Result } from './Host'
@@ -79,7 +80,7 @@ export function Phone({ code, token }: { code: string; token: string | null }) {
         </div>
 
         {isLobby ? (
-          <LobbyPhone view={view} />
+          <LobbyPhone view={view} run={run} />
         ) : (
           <>
             <SecretCard view={view} />
@@ -183,6 +184,10 @@ export function Phone({ code, token }: { code: string; token: string | null }) {
                 <Result view={view} />
               </div>
             )}
+
+            <div style={{ marginTop: 18 }}>
+              <QuickPhrases onSay={(t) => run('say', { text: t })} />
+            </div>
 
             <div className="panel" style={{ marginTop: 18 }}>
               <div className="h">最新播报</div>
@@ -302,7 +307,13 @@ function SecretCard({ view }: { view: RoomView }) {
   return null
 }
 
-function LobbyPhone({ view }: { view: RoomView }) {
+function LobbyPhone({
+  view,
+  run,
+}: {
+  view: RoomView
+  run: (a: string, p?: unknown) => Promise<string | null>
+}) {
   const host = view.players.find((p) => p.isHost)
   return (
     <>
@@ -325,11 +336,19 @@ function LobbyPhone({ view }: { view: RoomView }) {
           <span className="chip">
             {view.meta.minPlayers}–{view.meta.maxPlayers} 人
           </span>
+          {view.gameId === 'spy' && (
+            <span className="chip cool">
+              {(view.publicData?.spy as any)?.describeMode === 'typed' ? '⌨️ 打字描述' : '🗣 口头描述'}
+            </span>
+          )}
         </div>
       </div>
       <div className="panel">
         <div className="h">已经进来的人</div>
         <Seats view={view} />
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <QuickPhrases onSay={(t) => run('say', { text: t })} />
       </div>
       <p className="notice">
         这个页面会自动刷新，不用手动重进。房间号 {view.code}，关掉页面可以从{' '}

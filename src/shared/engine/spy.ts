@@ -1,6 +1,6 @@
 import { SPY_PAIRS } from '../content'
 import { judge } from '../judge'
-import type { FinalResult, Player, Room, RoomView, ViewNeeds } from '../types'
+import type { FinalResult, Player, Profile, Room, RoomView, SpyDescribeMode, ViewNeeds } from '../types'
 import type { GameEngine } from './contract'
 import {
   addScore,
@@ -23,6 +23,18 @@ const DESC_MS = 40_000
 const VOTE_MS = 30_000
 const MAX_ROUND = 6
 
+/** 至少留两个平民，否则卧底一开局就赢了 */
+export const maxInsiders = (n: number) => Math.max(1, n - 2)
+export const autoInsiders = (n: number) => (n >= 8 ? 2 : 1)
+export const effectiveInsiders = (n: number, pref: number | null) =>
+  Math.max(1, Math.min(pref ?? autoInsiders(n), maxInsiders(n)))
+
+/** 围桌坐且不是人人有手机时，开口说比低头打字自然；一半以上不敢开口的人反而更适合打字 */
+export function defaultDescribeMode(p: Profile): SpyDescribeMode {
+  if (!p.phonePerPerson) return 'oral'
+  return p.shyLevel === 2 ? 'typed' : 'oral'
+}
+
 /** 卧底判定以词本身为唯一真相，避免额外状态漂移。 */
 function idHasWord(room: Room, id: string) {
   const d = spy(room)
@@ -32,12 +44,12 @@ function idHasWord(room: Room, id: string) {
 
 function insidersOf(room: Room) {
   const d = spy(room)
-  return room.players.filter((p) => p.alive && d.words[p.id] && d.words[p.id] !== d.common)
+  return seated(room).filter((p) => p.alive && d.words[p.id] && d.words[p.id] !== d.common)
 }
 
 function civiliansOf(room: Room) {
   const d = spy(room)
-  return room.players.filter((p) => p.alive && d.words[p.id] === d.common)
+  return seated(room).filter((p) => p.alive && d.words[p.id] === d.common)
 }
 
 /** 真人裁判只执法不发词：把他从发词、描述、投票的池子里摘出去 */
@@ -131,7 +143,9 @@ export const spyEngine: GameEngine = {
     const [common, insider] = pick(SPY_PAIRS)
     d.common = common
     d.insider = insider
-    d.insiderCount = room.players.length >= 8 ? 2 : 1
+    d.insiderPref = null
+    d.describeMode = defaultDescribeMode(room.profile)
+    d.insiderCount = 1
     d.round = 0
     d.order = []
     d.descriptions = {}
@@ -144,10 +158,31 @@ export const spyEngine: GameEngine = {
     phase(room, 'lobby')
   },
 
+  configure(room: Room, opts: Record<string, unknown>): string | null {
+    if (room.phase !== 'lobby') return '开局之后就不能再改本局配置了'
+    const d = spy(room)
+    if (opts.insiderPref !== undefined) {
+      if (opts.insiderPref === null) {
+        d.insiderPref = null
+      } else {
+        const max = maxInsiders(seatedInGame(room).length)
+        const v = Math.round(Number(opts.insiderPref))
+        if (!Number.isFinite(v) || v < 1 || v > max) return `当前配置最多支持 ${max} 个卧底`
+        d.insiderPref = v
+      }
+    }
+    if (opts.describeMode !== undefined) {
+      if (opts.describeMode !== 'oral' && opts.describeMode !== 'typed') return '没有这种描述方式'
+      d.describeMode = opts.describeMode
+    }
+    return null
+  },
+
   start(room: Room) {
     const d = spy(room)
     const order = seatedInGame(room)
-    d.insiderCount = Math.max(1, Math.min(d.insiderCount, order.length - 2))
+    // 建房时房间里只有房主，卧底数必须等到人齐了才算
+    d.insiderCount = effectiveInsiders(order.length, d.insiderPref)
     const insiderSeats = shuffle(order.map((p) => p.id)).slice(0, d.insiderCount)
     for (const p of order) {
       d.words[p.id] = insiderSeats.includes(p.id) ? d.insider : d.common
@@ -164,14 +199,17 @@ export const spyEngine: GameEngine = {
       if (room.phase !== 'describe') return
       const currentId = d.order[room.turn]
       if (actor.id !== currentId || d.descriptions[actor.id] !== undefined) return
-      const text = sanitize(payload?.text, 80)
-      if (!text) return
-      d.descriptions[actor.id] = text
-      const word = d.words[actor.id]
-      if (word && text.includes(word)) {
-        ev(room, 'judge', `${actor.name} 的描述里直接出现了词，裁判判定无效，请重新描述。`)
-        delete d.descriptions[actor.id]
-        return
+      if (d.describeMode === 'oral') {
+        d.descriptions[actor.id] = '（已开口）'
+      } else {
+        const text = sanitize(payload?.text, 80)
+        if (!text) return
+        const word = d.words[actor.id]
+        if (word && text.includes(word)) {
+          ev(room, 'judge', `${actor.name} 的描述里直接出现了词，裁判判定无效，请重新描述。`)
+          return
+        }
+        d.descriptions[actor.id] = text
       }
       const nextTurn = room.turn + 1
       const livingOrder = d.order.filter((id) => byId(room, id)?.alive)
@@ -289,11 +327,17 @@ export const spyEngine: GameEngine = {
     const d = spy(room)
     const show = room.phase === 'reveal' || room.phase === 'over'
     const livingOrder = d.order.filter((id) => byId(room, id)?.alive)
+    const seatedCount = seatedInGame(room).length
     return {
       spy: {
         common: show ? d.common : '',
         insider: show ? d.insider : '',
-        insiderCount: d.insiderCount,
+        insiderCount: room.phase === 'lobby' ? effectiveInsiders(seatedCount, d.insiderPref) : d.insiderCount,
+        insiderPref: d.insiderPref,
+        insiderMax: maxInsiders(seatedCount),
+        insiderAuto: autoInsiders(seatedCount),
+        describeMode: d.describeMode,
+        seatedCount,
         round: d.round,
         order: d.order,
         livingOrder,
@@ -326,7 +370,7 @@ export const spyEngine: GameEngine = {
     const d = spy(room)
     return {
       answer: `${d.common} / ${d.insider}`,
-      insiderSeats: room.players.filter((p) => d.words[p.id] && d.words[p.id] !== d.common).map((p) => p.name),
+      insiderSeats: seated(room).filter((p) => d.words[p.id] && d.words[p.id] !== d.common).map((p) => p.name),
       pending: alive(room).filter((p) => d.votes[p.id] === undefined).map((p) => p.name),
       note: d.result ? '' : '可以手动判定某人出局，或替大家推进轮次。',
     }
@@ -373,10 +417,17 @@ export const spyEngine: GameEngine = {
       const currentId = d.order[room.turn]
       const mine = currentId === me.id
       const done = d.descriptions[me.id] !== undefined
+      const oral = d.describeMode === 'oral'
       return {
         ...base,
-        prompt: mine ? '轮到你了，说一句描述' : done ? '你已经说过了，等其他人' : '等着，别剧透',
-        input: mine && !done ? 'textarea' : 'none',
+        prompt: mine
+          ? oral
+            ? '轮到你了，开口说一句，说完点下面的按钮'
+            : '轮到你了，说一句描述'
+          : done
+            ? '你已经说过了，等其他人'
+            : '等着，别剧透',
+        input: mine && !done && !oral ? 'textarea' : 'none',
         inputHint: `你的词是「${d.words[me.id] ?? ''}」，用一句话描述它，不能出现这个词本身`,
         submitted: done,
         hostHint: hostHintFor(room),
@@ -404,10 +455,10 @@ export const spyEngine: GameEngine = {
 
   finish(room: Room): FinalResult {
     const d = spy(room)
-    const sorted = room.players.slice().sort((a, b) => b.score - a.score)
+    const sorted = seated(room).slice().sort((a, b) => b.score - a.score)
     const winners = sorted.slice(0, Math.max(1, sorted.filter((p) => p.score === sorted[0]?.score).length))
     const result = d.result === 'insider' ? '卧底方获胜' : '平民方获胜'
-    const survived = room.players.filter((p) => d.words[p.id] !== d.common && p.alive)
+    const survived = seated(room).filter((p) => d.words[p.id] !== d.common && p.alive)
     return {
       title: `${result} · 历时 ${d.round} 轮`,
       lines: [

@@ -333,7 +333,7 @@ export const sevenEngine: GameEngine = {
 
     let winners = best.map((id) => ({ name: nameOf(room, id), score: byId(room, id)?.score ?? 0 }))
     if (!winners.length) {
-      const top = room.players.slice().sort((a, b) => b.score - a.score)[0]
+      const top = seated(room).slice().sort((a, b) => b.score - a.score)[0]
       if (top) winners = [{ name: top.name, score: top.score }]
     }
 

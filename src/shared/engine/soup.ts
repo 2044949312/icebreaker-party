@@ -12,7 +12,7 @@ import type {
   ViewNeeds,
 } from '../types'
 import type { GameEngine } from './contract'
-import { addScore, clip, ev, grams, nameOf, overlap, phase, pick, sanitize, soup } from './util'
+import { addScore, clip, ev, grams, nameOf, overlap, phase, pick, sanitize, seated, soup } from './util'
 
 /* ----------------------------- 常量 ----------------------------- */
 
@@ -92,7 +92,7 @@ function realQuestionCount(d: SoupData) {
 function quietestName(room: Room, d: SoupData) {
   let target: Player | null = null
   let min = Infinity
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     const n = d.asked[p.id] ?? 0
     if (n < min) {
       min = n
@@ -131,7 +131,7 @@ function toOver(room: Room, reason: 'solved' | 'timeout' | 'stop') {
 /** 猜对 +6；其他人按提问数 min(次数,5)；用过的提示每人 -1（addScore 自己兜到 0） */
 function scoreSoup(room: Room) {
   const d = soup(room)
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     if (d.solved && d.solvedBy === p.id) addScore(room, p.id, SOLVE_POINTS)
     else addScore(room, p.id, Math.min(d.asked[p.id] ?? 0, ASK_POINTS_CAP))
     if (d.hintsUsed > 0) addScore(room, p.id, -d.hintsUsed)
@@ -465,7 +465,7 @@ export const soupEngine: GameEngine = {
 
   finish(room: Room): FinalResult {
     const d = soup(room)
-    const ranked = rankByScore(room.players)
+    const ranked = rankByScore(seated(room))
     const top = ranked[0]?.rank ?? 0
     const winners = ranked
       .filter((r) => r.rank === top)

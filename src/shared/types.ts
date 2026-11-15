@@ -77,6 +77,8 @@ export interface Player {
   isHost: boolean
   connected: boolean
   lastSeen: number
+  /** 上一次喊话时间，用于节流，避免刷屏把裁判播报挤出事件列表 */
+  lastChatAt: number
   score: number
   alive: boolean
   outReason: string | null
@@ -85,7 +87,7 @@ export interface Player {
 export interface RoomEvent {
   seq: number
   at: number
-  kind: 'info' | 'judge' | 'score' | 'join'
+  kind: 'info' | 'judge' | 'score' | 'join' | 'chat'
   text: string
 }
 
@@ -98,6 +100,8 @@ export interface Room {
   profile: Profile
   judgeMode: JudgeMode
   refereeId: string | null
+  /** 房主是否也作为玩家参加（开局前在大厅里选）；false 时房主只主持，不进游戏池 */
+  hostPlays: boolean
 
   phase: string
   round: number
@@ -132,10 +136,16 @@ export interface GameData {
 }
 
 /* ---------------------------- 谁是卧底 ---------------------------- */
+/** oral：大家开口说，手机只负责发词和推进；typed：每人在手机上打字 */
+export type SpyDescribeMode = 'oral' | 'typed'
+
 export interface SpyData {
   common: string
   insider: string
   insiderCount: number
+  /** 房主指定的卧底数，null 表示按人数自动 */
+  insiderPref: number | null
+  describeMode: SpyDescribeMode
   round: number
   /** 本轮描述顺序（playerId） */
   order: string[]
@@ -313,6 +323,7 @@ export interface RoomView {
   serverNow: number
   judgeMode: JudgeMode
   refereeId: string | null
+  hostPlays: boolean
   role: Role
   me: Player | null
   players: Player[]

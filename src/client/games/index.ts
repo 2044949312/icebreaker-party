@@ -39,40 +39,57 @@ const ONE_OF = ['一', '二', '三']
 
 /* ----------------------------- 谁是卧底 ----------------------------- */
 
+const spyOral = (view: RoomView) => pd(view).describeMode === 'oral'
+
+const spyTurnId = (view: RoomView) => {
+  const d = pd(view)
+  if (view.phase !== 'describe') return null
+  return (d.livingOrder ?? d.order ?? [])[view.turn] ?? null
+}
+
 const spyUI: GameUI = {
   phaseName,
-  turnId: (view) => {
-    const d = pd(view)
-    if (view.phase !== 'describe') return null
-    return (d.livingOrder ?? d.order ?? [])[view.turn] ?? null
-  },
+  turnId: spyTurnId,
   input: (view) => {
-    if (view.phase === 'describe') return { action: 'describe', field: 'text' }
+    if (view.phase === 'describe') return spyOral(view) ? null : { action: 'describe', field: 'text' }
     if (view.phase === 'vote') return { action: 'vote' }
     return null
   },
+  extras: [
+    {
+      action: 'describe',
+      label: '🗣 我说完了',
+      payload: {},
+      when: (view, me) =>
+        view.phase === 'describe' && spyOral(view) && spyTurnId(view) === me.id && !view.needs.submitted,
+    },
+  ],
   stage: (view) => {
     const d = pd(view)
     const ids = living(view).map((p) => p.id)
+    const oral = spyOral(view)
     if (view.phase === 'lobby') {
       return idle('谁是卧底', '发词之前', '人到齐就开始，系统会把近义词悄悄塞给其中一两个人。', [
         `${view.players.length} 人`,
         `${d.insiderCount ?? 1} 个卧底`,
+        oral ? '口头描述' : '打字描述',
       ])
     }
     if (view.phase === 'describe') {
-      const t = spyUI.turnId!(view)
+      const t = spyTurnId(view)
       const said = ids.filter((id) => d.descriptions?.[id]).length
       return {
         eyebrow: `第 ${view.round} 轮 · 描述`,
         focus: nameOf(view, t),
-        focusHint: '用一句话说说自己手里那个词，但不能直接说出来',
+        focusHint: oral
+          ? '开口说一句，别把词本身说出来；说完在手机上点「我说完了」'
+          : '用一句话说说自己手里那个词，但不能直接说出来',
         tone: 'cool',
         rows: (d.livingOrder ?? d.order ?? []).map((id: string) => ({
           who: nameOf(view, id),
-          what: d.descriptions?.[id] ?? '……还没开口',
+          what: d.descriptions?.[id] ?? (oral ? '……还没开口' : '……还没写'),
         })),
-        chips: [progress(said, ids.length), '说出来就判无效'],
+        chips: [progress(said, ids.length), oral ? '说完点手机上的按钮' : '说出来就判无效'],
       }
     }
     if (view.phase === 'vote') {

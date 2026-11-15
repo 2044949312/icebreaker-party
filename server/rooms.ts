@@ -1,7 +1,10 @@
 import type { GameData, Profile, Room, RoomView, Player } from '../src/shared/types'
 import { ROOM_CODE_LENGTH } from '../src/shared/types'
 import { GAME_BY_ID } from '../src/shared/games'
+import { isQuickPhrase } from '../src/shared/phrases'
 import { engineFor } from '../src/shared/engine'
+import { seated } from '../src/shared/engine/util'
+import { ev } from '../src/shared/engine/util'
 import { memoryStore, ROOM_TTL_MS, type Loaded, type RoomStore } from './store'
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -9,6 +12,8 @@ const TOKEN_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789'
 const PLAYER_OFFLINE_MS = 45_000
 /** 在线状态写库的最小间隔，避免每次轮询都产生一次写 */
 const PRESENCE_WRITE_MS = 10_000
+/** 喊话节流：事件列表只留 60 条，刷屏会把裁判播报挤掉 */
+const CHAT_COOLDOWN_MS = 2_000
 const CAS_ATTEMPTS = 4
 
 export interface CreateInput {
@@ -117,6 +122,7 @@ export async function createRoom(input: CreateInput): Promise<{ room: Room; host
     isHost: true,
     connected: true,
     lastSeen: now,
+    lastChatAt: 0,
     score: 0,
     alive: true,
     outReason: null,
@@ -131,6 +137,7 @@ export async function createRoom(input: CreateInput): Promise<{ room: Room; host
     profile: input.profile,
     judgeMode: meta.judgeModes.includes(input.judgeMode) ? input.judgeMode : meta.judgeModes[0],
     refereeId: null,
+    hostPlays: true,
     phase: 'lobby',
     round: 0,
     turn: 0,
@@ -159,6 +166,8 @@ export async function joinRoom(
   if (!clean) return null
   const result = await mutateRoom(normalize(code), (room) => {
     if (room.phase !== 'lobby') return null
+    const meta = GAME_BY_ID[room.gameId]
+    if (meta && room.players.length >= meta.maxPlayers) return null
 
     const taken = new Set(room.players.map((p) => p.name))
     let finalName = clean
@@ -172,6 +181,7 @@ export async function joinRoom(
       isHost: false,
       connected: true,
       lastSeen: Date.now(),
+      lastChatAt: 0,
       score: 0,
       alive: true,
       outReason: null,
@@ -195,12 +205,16 @@ export function touch(room: Room) {
   if (room.events.length > 60) room.events.splice(0, room.events.length - 60)
 }
 
-/** 房主在 lobby 里设定裁判模式与真人裁判 */
+/** 房主在 lobby 里设定裁判模式、真人裁判与本局游戏参数 */
 export function configureRoom(
   room: Room,
-  opts: { judgeMode?: 'ai' | 'human'; refereeId?: string | null },
+  opts: { judgeMode?: 'ai' | 'human'; refereeId?: string | null; hostPlays?: boolean; game?: Record<string, unknown> },
 ): string | null {
   const meta = GAME_BY_ID[room.gameId]
+  if (opts.hostPlays !== undefined) {
+    if (room.phase !== 'lobby') return '开局之后就不能再改房主是否参加了'
+    room.hostPlays = !!opts.hostPlays
+  }
   if (opts.judgeMode) {
     if (!meta.judgeModes.includes(opts.judgeMode)) return `${meta.name} 不支持这种裁判方式`
     room.judgeMode = opts.judgeMode
@@ -216,6 +230,12 @@ export function configureRoom(
       room.refereeId = p.id
     }
   }
+  if (opts.game) {
+    const engine = engineFor(room.gameId)
+    if (!engine?.configure) return '这个游戏没有可调的配置'
+    const err = engine.configure(room, opts.game)
+    if (err) return err
+  }
   if (room.judgeMode === 'human' && !room.refereeId && room.phase === 'lobby') {
     return '还差一步：指定一名真人裁判'
   }
@@ -226,13 +246,24 @@ export function configureRoom(
 export function startRoom(room: Room, hostToken: string): string | null {
   if (!room.players.some((p) => p.id === hostToken && p.isHost)) return '只有房主能开始这局'
   const meta = GAME_BY_ID[room.gameId]
-  if (room.players.length < meta.minPlayers) return `至少 ${meta.minPlayers} 个人才能开这局`
+  if (seated(room).length < meta.minPlayers) return `至少 ${meta.minPlayers} 个人才能开这局`
   if (room.judgeMode === 'human' && !room.refereeId) return '请先指定一名真人裁判'
   const engine = engineFor(room.gameId)
   if (!engine) return '游戏引擎缺失'
   room.startedAt = Date.now()
   room.seq += 1
   engine.start(room)
+  touch(room)
+  return null
+}
+
+/** 喊话是所有游戏共用的一层，不进各引擎 */
+function say(room: Room, actor: Player, payload: any): string | null {
+  if (!isQuickPhrase(payload?.text)) return '只能发列表里的话'
+  const now = Date.now()
+  if (now - actor.lastChatAt < CHAT_COOLDOWN_MS) return null
+  actor.lastChatAt = now
+  ev(room, 'chat', `${actor.name}：${payload.text}`)
   touch(room)
   return null
 }
@@ -247,6 +278,7 @@ export function act(
   const actor = room.players.find((p) => p.id === token)
   if (!engine || !actor) return '身份失效，请重新加入房间'
   if (!/^[a-zA-Z][a-zA-Z0-9]{1,24}$/.test(action)) return '未知操作'
+  if (action === 'say') return say(room, actor, payload)
   engine.act(room, actor, action, payload ?? {})
   touch(room)
   return null
@@ -291,6 +323,11 @@ export function buildView(room: Room, token: string | null, asWatcher = false): 
     connected: now - p.lastSeen < PLAYER_OFFLINE_MS,
   }))
 
+  // 房主只主持（或房主就是真人裁判）时按观众下发：不给玩家输入、不发私密词
+  const spectatingHost =
+    !!me?.isHost &&
+    (room.hostPlays === false || (room.judgeMode === 'human' && room.refereeId === me.id))
+
   const view: RoomView = {
     code: room.code,
     seq: room.seq,
@@ -303,18 +340,19 @@ export function buildView(room: Room, token: string | null, asWatcher = false): 
     serverNow: now,
     judgeMode: room.judgeMode,
     refereeId: room.refereeId,
+    hostPlays: room.hostPlays,
     role,
     me: me ? players.find((p) => p.id === me.id) ?? null : null,
     players,
     events: room.events.slice(-14),
     finished: room.finished,
     publicData: engine.publicData(room),
-    secret: me && !asWatcher ? engine.secretFor(room, me) : {},
+    secret: me && !asWatcher && !spectatingHost ? engine.secretFor(room, me) : {},
     referee: isRefereeViewer(room, me) ? engine.refereeExtra(room) : null,
     needs: { prompt: null, input: 'none', inputHint: '', submitted: false, hostHint: '' },
   }
 
-  view.needs = engine.needs(room, role === 'watcher' ? null : me, view)
+  view.needs = engine.needs(room, role === 'watcher' || spectatingHost ? null : me, view)
   return view
 }
 

@@ -10,6 +10,9 @@ export interface GameEngine {
   /** 建房后调用：填好 data.xxx、把 phase 停在等待开始的状态 */
   create(room: Room): void
 
+  /** 房主在等待阶段调整本局参数；返回错误文案，null 表示接受。没有可调参数的游戏不实现。 */
+  configure?(room: Room, opts: Record<string, unknown>): string | null
+
   /** 房主点「开始」后调用：分配身份/题目、进入第一个正式阶段 */
   start(room: Room): void
 

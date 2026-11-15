@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { joinRoom } from '../api'
 import { go, saveToken } from '../route'
+import { RecentRooms } from '../ui/RecentRooms'
 import { ROOM_CODE_LENGTH } from '../../shared/types'
 
 export function Join({ initialCode }: { initialCode: string }) {
@@ -18,7 +19,7 @@ export function Join({ initialCode }: { initialCode: string }) {
     try {
       const res = await joinRoom(code.toUpperCase(), name.trim())
       localStorage.setItem('icebreaker.name', name.trim())
-      saveToken(res.code, res.token)
+      saveToken(res.code, res.token, { gameId: res.view.gameId, role: 'player' })
       go(`/p.html?c=${res.code}`)
     } catch (e: any) {
       setErr(e?.message ?? '进不去这个房间')
@@ -83,6 +84,15 @@ export function Join({ initialCode }: { initialCode: string }) {
               打开主持人屏
             </button>
           </p>
+
+          <div style={{ marginTop: 18 }}>
+            <RecentRooms
+              onPick={(c) => {
+                setCode(c)
+                setErr(null)
+              }}
+            />
+          </div>
         </div>
       </div>
     </div>

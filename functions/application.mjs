@@ -272,6 +272,25 @@ var GAME_BY_ID = Object.fromEntries(
 // src/shared/types.ts
 var ROOM_CODE_LENGTH = 6;
 
+// src/shared/phrases.ts
+var QUICK_PHRASES = [
+  "\u5F00\u59CB\u5427",
+  "\u5927\u5BB6\u5F80\u524D\u5750\uFF0C\u4E0D\u7B49\u4E86",
+  "\u7B49\u4E00\u5206\u949F\u5F00",
+  "\u7B49\u4E09\u5206\u949F\u5F00",
+  "\u623F\u4E3B\u52A0\u4E2A\u4F4D\u7F6E",
+  "\u8BF7\u64CD\u4F5C\u5FEB\u4E00\u70B9",
+  "\u7B49\u6211\u601D\u8003 30 \u79D2",
+  "\u6211\u4E34\u65F6\u6709\u4E8B\uFF0C\u7B49\u6211\u51E0\u5206\u949F",
+  "\u6211\u6302\u673A\u4E86\uFF0C\u4F60\u4EEC\u73A9",
+  "\u6211\u6709\u4E8B\u4E0D\u73A9\u4E86\uFF0C\u62DC\u62DC",
+  "\u6700\u540E\u4E00\u5C40\uFF0C\u73A9\u5B8C\u8FD9\u5C40\u6211\u4E0B\u4E86",
+  "\u518D\u6765\u4E00\u5C40"
+];
+var QUICK_REACTIONS = ["\u597D\u554A", "\u62B1\u6B49\uFF0C\u4E0D\u884C", "\u54C8\u54C8", "\u8C22\u8C22", "\u563F\u563F", "\u545C\u545C", "\u9976\u547D"];
+var ALLOWED = /* @__PURE__ */ new Set([...QUICK_PHRASES, ...QUICK_REACTIONS]);
+var isQuickPhrase = (s) => typeof s === "string" && ALLOWED.has(s);
+
 // src/shared/judge.ts
 var P = {
   open: [
@@ -397,7 +416,8 @@ function shuffle(arr) {
   }
   return out;
 }
-var seated = (room) => room.players.slice().sort((a, b) => a.seat - b.seat);
+var sittingOut = (room, p) => p.isHost && (room.hostPlays === false || room.judgeMode === "human" && room.refereeId === p.id);
+var seated = (room) => room.players.filter((p) => !sittingOut(room, p)).sort((a, b) => a.seat - b.seat);
 var alive = (room) => seated(room).filter((p) => p.alive);
 var byId = (room, id) => room.players.find((p) => p.id === id);
 var nameOf = (room, id) => id && byId(room, id)?.name || "\u67D0\u4EBA";
@@ -503,7 +523,7 @@ function newRound(room) {
   d.low = MIN_VALUE;
   d.high = MAX_VALUE;
   d.history = [];
-  d.order = shuffle(room.players.map((p) => p.id));
+  d.order = shuffle(seated(room).map((p) => p.id));
   d.cursor = 0;
   d.loser = null;
   phase(room, "hunt", { ms: HUNT_MS, round: d.round });
@@ -525,7 +545,7 @@ function advance(room) {
 function awardSafe(room) {
   const d = bomb(room);
   let safe = 0;
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     if (p.id === d.loser) continue;
     addScore(room, p.id, SAFE_POINTS);
     safe += 1;
@@ -538,7 +558,7 @@ function awardSafe(room) {
 }
 function settleBoomBonus(room) {
   const d = bomb(room);
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     addScore(room, p.id, Math.max(0, d.maxRound - boomCount(d, p.id)));
   }
 }
@@ -557,14 +577,14 @@ function toOver(room) {
 }
 function worstBoomer(room, d) {
   let target = null;
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     const n = boomCount(d, p.id);
     if (n > 0 && (!target || n > target.n)) target = { name: p.name, n };
   }
   return target;
 }
 function boomsLine(room, d) {
-  const rows = room.players.map((p) => ({ name: p.name, n: boomCount(d, p.id) })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name, "zh"));
+  const rows = seated(room).map((p) => ({ name: p.name, n: boomCount(d, p.id) })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name, "zh"));
   if (!rows.length) return "\u6CA1\u4EBA\u53C2\u4E0E\u62A5\u6570\u3002";
   return `\u8E29\u96F7\u699C\uFF1A${rows.map((r) => `${r.name} \xD7${r.n}`).join("\u3001")}\u3002`;
 }
@@ -767,10 +787,10 @@ var bombEngine = {
   },
   finish(room) {
     const d = bomb(room);
-    const ranked = rankByScore(room.players);
+    const ranked = rankByScore(seated(room));
     const top = ranked[0]?.rank ?? 0;
     const winners = ranked.filter((r) => r.rank === top).map((r) => ({ name: r.player.name, score: r.player.score }));
-    const safest = room.players.map((p) => ({ name: p.name, n: boomCount(d, p.id) })).sort((a, b) => a.n - b.n)[0];
+    const safest = seated(room).map((p) => ({ name: p.name, n: boomCount(d, p.id) })).sort((a, b) => a.n - b.n)[0];
     const worst = worstBoomer(room, d);
     return {
       title: "\u8E29\u96F7\u699C",
@@ -1910,7 +1930,7 @@ var neverEngine = {
   create(room) {
     const d = never(room);
     d.startScore = START_SCORE;
-    for (const p of room.players) p.score = START_SCORE;
+    for (const p of seated(room)) p.score = START_SCORE;
     d.claims = {};
     d.order = [];
     d.cursor = 0;
@@ -2127,7 +2147,7 @@ var neverEngine = {
   },
   finish(room) {
     const d = never(room);
-    const ranked = rankByScore(room.players);
+    const ranked = rankByScore(seated(room));
     const top = ranked[0];
     const bottom = ranked[ranked.length - 1];
     const winners = ranked.filter((r) => r.rank === 0).map((r) => ({ name: r.player.name, score: r.player.score }));
@@ -2445,7 +2465,7 @@ var sevenEngine = {
     const best = ranked.filter((id) => (d.mistakes[id] ?? 0) === fewest);
     let winners = best.map((id) => ({ name: nameOf(room, id), score: byId(room, id)?.score ?? 0 }));
     if (!winners.length) {
-      const top = room.players.slice().sort((a, b) => b.score - a.score)[0];
+      const top = seated(room).slice().sort((a, b) => b.score - a.score)[0];
       if (top) winners = [{ name: top.name, score: top.score }];
     }
     return {
@@ -2513,7 +2533,7 @@ function realQuestionCount(d) {
 function quietestName(room, d) {
   let target = null;
   let min = Infinity;
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     const n = d.asked[p.id] ?? 0;
     if (n < min) {
       min = n;
@@ -2543,7 +2563,7 @@ function toOver2(room, reason) {
 }
 function scoreSoup(room) {
   const d = soup(room);
-  for (const p of room.players) {
+  for (const p of seated(room)) {
     if (d.solved && d.solvedBy === p.id) addScore(room, p.id, SOLVE_POINTS);
     else addScore(room, p.id, Math.min(d.asked[p.id] ?? 0, ASK_POINTS_CAP));
     if (d.hintsUsed > 0) addScore(room, p.id, -d.hintsUsed);
@@ -2822,7 +2842,7 @@ var soupEngine = {
   },
   finish(room) {
     const d = soup(room);
-    const ranked = rankByScore(room.players);
+    const ranked = rankByScore(seated(room));
     const top = ranked[0]?.rank ?? 0;
     const winners = ranked.filter((r) => r.rank === top).map((r) => ({ name: r.player.name, score: r.player.score }));
     const askedList = Object.entries(d.asked).sort((a, b) => b[1] - a[1]);
@@ -2847,6 +2867,13 @@ var soupEngine = {
 var DESC_MS = 4e4;
 var VOTE_MS = 3e4;
 var MAX_ROUND2 = 6;
+var maxInsiders = (n) => Math.max(1, n - 2);
+var autoInsiders = (n) => n >= 8 ? 2 : 1;
+var effectiveInsiders = (n, pref) => Math.max(1, Math.min(pref ?? autoInsiders(n), maxInsiders(n)));
+function defaultDescribeMode(p) {
+  if (!p.phonePerPerson) return "oral";
+  return p.shyLevel === 2 ? "typed" : "oral";
+}
 function idHasWord(room, id) {
   const d = spy(room);
   const mine = d.words[id];
@@ -2854,11 +2881,11 @@ function idHasWord(room, id) {
 }
 function insidersOf(room) {
   const d = spy(room);
-  return room.players.filter((p) => p.alive && d.words[p.id] && d.words[p.id] !== d.common);
+  return seated(room).filter((p) => p.alive && d.words[p.id] && d.words[p.id] !== d.common);
 }
 function civiliansOf(room) {
   const d = spy(room);
-  return room.players.filter((p) => p.alive && d.words[p.id] === d.common);
+  return seated(room).filter((p) => p.alive && d.words[p.id] === d.common);
 }
 function isJudge(room, id) {
   return room.judgeMode === "human" && room.refereeId === id;
@@ -2938,7 +2965,9 @@ var spyEngine = {
     const [common, insider] = pick(SPY_PAIRS);
     d.common = common;
     d.insider = insider;
-    d.insiderCount = room.players.length >= 8 ? 2 : 1;
+    d.insiderPref = null;
+    d.describeMode = defaultDescribeMode(room.profile);
+    d.insiderCount = 1;
     d.round = 0;
     d.order = [];
     d.descriptions = {};
@@ -2950,10 +2979,29 @@ var spyEngine = {
     d.result = null;
     phase(room, "lobby");
   },
+  configure(room, opts) {
+    if (room.phase !== "lobby") return "\u5F00\u5C40\u4E4B\u540E\u5C31\u4E0D\u80FD\u518D\u6539\u672C\u5C40\u914D\u7F6E\u4E86";
+    const d = spy(room);
+    if (opts.insiderPref !== void 0) {
+      if (opts.insiderPref === null) {
+        d.insiderPref = null;
+      } else {
+        const max = maxInsiders(seatedInGame(room).length);
+        const v = Math.round(Number(opts.insiderPref));
+        if (!Number.isFinite(v) || v < 1 || v > max) return `\u5F53\u524D\u914D\u7F6E\u6700\u591A\u652F\u6301 ${max} \u4E2A\u5367\u5E95`;
+        d.insiderPref = v;
+      }
+    }
+    if (opts.describeMode !== void 0) {
+      if (opts.describeMode !== "oral" && opts.describeMode !== "typed") return "\u6CA1\u6709\u8FD9\u79CD\u63CF\u8FF0\u65B9\u5F0F";
+      d.describeMode = opts.describeMode;
+    }
+    return null;
+  },
   start(room) {
     const d = spy(room);
     const order = seatedInGame(room);
-    d.insiderCount = Math.max(1, Math.min(d.insiderCount, order.length - 2));
+    d.insiderCount = effectiveInsiders(order.length, d.insiderPref);
     const insiderSeats = shuffle(order.map((p) => p.id)).slice(0, d.insiderCount);
     for (const p of order) {
       d.words[p.id] = insiderSeats.includes(p.id) ? d.insider : d.common;
@@ -2968,14 +3016,17 @@ var spyEngine = {
       if (room.phase !== "describe") return;
       const currentId3 = d.order[room.turn];
       if (actor.id !== currentId3 || d.descriptions[actor.id] !== void 0) return;
-      const text = sanitize(payload?.text, 80);
-      if (!text) return;
-      d.descriptions[actor.id] = text;
-      const word = d.words[actor.id];
-      if (word && text.includes(word)) {
-        ev(room, "judge", `${actor.name} \u7684\u63CF\u8FF0\u91CC\u76F4\u63A5\u51FA\u73B0\u4E86\u8BCD\uFF0C\u88C1\u5224\u5224\u5B9A\u65E0\u6548\uFF0C\u8BF7\u91CD\u65B0\u63CF\u8FF0\u3002`);
-        delete d.descriptions[actor.id];
-        return;
+      if (d.describeMode === "oral") {
+        d.descriptions[actor.id] = "\uFF08\u5DF2\u5F00\u53E3\uFF09";
+      } else {
+        const text = sanitize(payload?.text, 80);
+        if (!text) return;
+        const word = d.words[actor.id];
+        if (word && text.includes(word)) {
+          ev(room, "judge", `${actor.name} \u7684\u63CF\u8FF0\u91CC\u76F4\u63A5\u51FA\u73B0\u4E86\u8BCD\uFF0C\u88C1\u5224\u5224\u5B9A\u65E0\u6548\uFF0C\u8BF7\u91CD\u65B0\u63CF\u8FF0\u3002`);
+          return;
+        }
+        d.descriptions[actor.id] = text;
       }
       const nextTurn = room.turn + 1;
       const livingOrder = d.order.filter((id) => byId(room, id)?.alive);
@@ -3083,11 +3134,17 @@ var spyEngine = {
     const d = spy(room);
     const show = room.phase === "reveal" || room.phase === "over";
     const livingOrder = d.order.filter((id) => byId(room, id)?.alive);
+    const seatedCount = seatedInGame(room).length;
     return {
       spy: {
         common: show ? d.common : "",
         insider: show ? d.insider : "",
-        insiderCount: d.insiderCount,
+        insiderCount: room.phase === "lobby" ? effectiveInsiders(seatedCount, d.insiderPref) : d.insiderCount,
+        insiderPref: d.insiderPref,
+        insiderMax: maxInsiders(seatedCount),
+        insiderAuto: autoInsiders(seatedCount),
+        describeMode: d.describeMode,
+        seatedCount,
         round: d.round,
         order: d.order,
         livingOrder,
@@ -3118,7 +3175,7 @@ var spyEngine = {
     const d = spy(room);
     return {
       answer: `${d.common} / ${d.insider}`,
-      insiderSeats: room.players.filter((p) => d.words[p.id] && d.words[p.id] !== d.common).map((p) => p.name),
+      insiderSeats: seated(room).filter((p) => d.words[p.id] && d.words[p.id] !== d.common).map((p) => p.name),
       pending: alive(room).filter((p) => d.votes[p.id] === void 0).map((p) => p.name),
       note: d.result ? "" : "\u53EF\u4EE5\u624B\u52A8\u5224\u5B9A\u67D0\u4EBA\u51FA\u5C40\uFF0C\u6216\u66FF\u5927\u5BB6\u63A8\u8FDB\u8F6E\u6B21\u3002"
     };
@@ -3157,10 +3214,11 @@ var spyEngine = {
       const currentId3 = d.order[room.turn];
       const mine = currentId3 === me.id;
       const done = d.descriptions[me.id] !== void 0;
+      const oral = d.describeMode === "oral";
       return {
         ...base,
-        prompt: mine ? "\u8F6E\u5230\u4F60\u4E86\uFF0C\u8BF4\u4E00\u53E5\u63CF\u8FF0" : done ? "\u4F60\u5DF2\u7ECF\u8BF4\u8FC7\u4E86\uFF0C\u7B49\u5176\u4ED6\u4EBA" : "\u7B49\u7740\uFF0C\u522B\u5267\u900F",
-        input: mine && !done ? "textarea" : "none",
+        prompt: mine ? oral ? "\u8F6E\u5230\u4F60\u4E86\uFF0C\u5F00\u53E3\u8BF4\u4E00\u53E5\uFF0C\u8BF4\u5B8C\u70B9\u4E0B\u9762\u7684\u6309\u94AE" : "\u8F6E\u5230\u4F60\u4E86\uFF0C\u8BF4\u4E00\u53E5\u63CF\u8FF0" : done ? "\u4F60\u5DF2\u7ECF\u8BF4\u8FC7\u4E86\uFF0C\u7B49\u5176\u4ED6\u4EBA" : "\u7B49\u7740\uFF0C\u522B\u5267\u900F",
+        input: mine && !done && !oral ? "textarea" : "none",
         inputHint: `\u4F60\u7684\u8BCD\u662F\u300C${d.words[me.id] ?? ""}\u300D\uFF0C\u7528\u4E00\u53E5\u8BDD\u63CF\u8FF0\u5B83\uFF0C\u4E0D\u80FD\u51FA\u73B0\u8FD9\u4E2A\u8BCD\u672C\u8EAB`,
         submitted: done,
         hostHint: hostHintFor4(room)
@@ -3187,10 +3245,10 @@ var spyEngine = {
   },
   finish(room) {
     const d = spy(room);
-    const sorted = room.players.slice().sort((a, b) => b.score - a.score);
+    const sorted = seated(room).slice().sort((a, b) => b.score - a.score);
     const winners = sorted.slice(0, Math.max(1, sorted.filter((p) => p.score === sorted[0]?.score).length));
     const result = d.result === "insider" ? "\u5367\u5E95\u65B9\u83B7\u80DC" : "\u5E73\u6C11\u65B9\u83B7\u80DC";
-    const survived = room.players.filter((p) => d.words[p.id] !== d.common && p.alive);
+    const survived = seated(room).filter((p) => d.words[p.id] !== d.common && p.alive);
     return {
       title: `${result} \xB7 \u5386\u65F6 ${d.round} \u8F6E`,
       lines: [
@@ -3542,7 +3600,7 @@ var storyEngine = {
   },
   finish(room) {
     const d = story(room);
-    const ranked = rankByScore(room.players);
+    const ranked = rankByScore(seated(room));
     const top = ranked[0];
     const bottom = ranked[ranked.length - 1];
     const winners = ranked.filter((r) => r.rank === 0).map((r) => ({ name: r.player.name, score: r.player.score }));
@@ -3935,7 +3993,7 @@ var twosEngine = {
   },
   finish(room) {
     const d = twos(room);
-    const ranked = rankByScore(room.players);
+    const ranked = rankByScore(seated(room));
     const top = ranked[0];
     const bottom = ranked[ranked.length - 1];
     const winners = ranked.filter((r) => r.rank === 0).map((r) => ({ name: r.player.name, score: r.player.score }));
@@ -4089,6 +4147,7 @@ var CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 var TOKEN_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 var PLAYER_OFFLINE_MS = 45e3;
 var PRESENCE_WRITE_MS = 1e4;
+var CHAT_COOLDOWN_MS = 2e3;
 var CAS_ATTEMPTS = 4;
 var store = memoryStore();
 function useRoomStore(next) {
@@ -4170,6 +4229,7 @@ async function createRoom(input) {
     isHost: true,
     connected: true,
     lastSeen: now,
+    lastChatAt: 0,
     score: 0,
     alive: true,
     outReason: null
@@ -4183,6 +4243,7 @@ async function createRoom(input) {
     profile: input.profile,
     judgeMode: meta.judgeModes.includes(input.judgeMode) ? input.judgeMode : meta.judgeModes[0],
     refereeId: null,
+    hostPlays: true,
     phase: "lobby",
     round: 0,
     turn: 0,
@@ -4205,6 +4266,8 @@ async function joinRoom(code, name) {
   if (!clean) return null;
   const result = await mutateRoom(normalize(code), (room) => {
     if (room.phase !== "lobby") return null;
+    const meta = GAME_BY_ID[room.gameId];
+    if (meta && room.players.length >= meta.maxPlayers) return null;
     const taken = new Set(room.players.map((p) => p.name));
     let finalName = clean;
     let n = 2;
@@ -4216,6 +4279,7 @@ async function joinRoom(code, name) {
       isHost: false,
       connected: true,
       lastSeen: Date.now(),
+      lastChatAt: 0,
       score: 0,
       alive: true,
       outReason: null
@@ -4239,6 +4303,10 @@ function touch(room) {
 }
 function configureRoom(room, opts) {
   const meta = GAME_BY_ID[room.gameId];
+  if (opts.hostPlays !== void 0) {
+    if (room.phase !== "lobby") return "\u5F00\u5C40\u4E4B\u540E\u5C31\u4E0D\u80FD\u518D\u6539\u623F\u4E3B\u662F\u5426\u53C2\u52A0\u4E86";
+    room.hostPlays = !!opts.hostPlays;
+  }
   if (opts.judgeMode) {
     if (!meta.judgeModes.includes(opts.judgeMode)) return `${meta.name} \u4E0D\u652F\u6301\u8FD9\u79CD\u88C1\u5224\u65B9\u5F0F`;
     room.judgeMode = opts.judgeMode;
@@ -4254,6 +4322,12 @@ function configureRoom(room, opts) {
       room.refereeId = p.id;
     }
   }
+  if (opts.game) {
+    const engine = engineFor(room.gameId);
+    if (!engine?.configure) return "\u8FD9\u4E2A\u6E38\u620F\u6CA1\u6709\u53EF\u8C03\u7684\u914D\u7F6E";
+    const err = engine.configure(room, opts.game);
+    if (err) return err;
+  }
   if (room.judgeMode === "human" && !room.refereeId && room.phase === "lobby") {
     return "\u8FD8\u5DEE\u4E00\u6B65\uFF1A\u6307\u5B9A\u4E00\u540D\u771F\u4EBA\u88C1\u5224";
   }
@@ -4263,7 +4337,7 @@ function configureRoom(room, opts) {
 function startRoom(room, hostToken) {
   if (!room.players.some((p) => p.id === hostToken && p.isHost)) return "\u53EA\u6709\u623F\u4E3B\u80FD\u5F00\u59CB\u8FD9\u5C40";
   const meta = GAME_BY_ID[room.gameId];
-  if (room.players.length < meta.minPlayers) return `\u81F3\u5C11 ${meta.minPlayers} \u4E2A\u4EBA\u624D\u80FD\u5F00\u8FD9\u5C40`;
+  if (seated(room).length < meta.minPlayers) return `\u81F3\u5C11 ${meta.minPlayers} \u4E2A\u4EBA\u624D\u80FD\u5F00\u8FD9\u5C40`;
   if (room.judgeMode === "human" && !room.refereeId) return "\u8BF7\u5148\u6307\u5B9A\u4E00\u540D\u771F\u4EBA\u88C1\u5224";
   const engine = engineFor(room.gameId);
   if (!engine) return "\u6E38\u620F\u5F15\u64CE\u7F3A\u5931";
@@ -4273,11 +4347,21 @@ function startRoom(room, hostToken) {
   touch(room);
   return null;
 }
+function say(room, actor, payload) {
+  if (!isQuickPhrase(payload?.text)) return "\u53EA\u80FD\u53D1\u5217\u8868\u91CC\u7684\u8BDD";
+  const now = Date.now();
+  if (now - actor.lastChatAt < CHAT_COOLDOWN_MS) return null;
+  actor.lastChatAt = now;
+  ev(room, "chat", `${actor.name}\uFF1A${payload.text}`);
+  touch(room);
+  return null;
+}
 function act(room, token, action, payload) {
   const engine = engineFor(room.gameId);
   const actor = room.players.find((p) => p.id === token);
   if (!engine || !actor) return "\u8EAB\u4EFD\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u52A0\u5165\u623F\u95F4";
   if (!/^[a-zA-Z][a-zA-Z0-9]{1,24}$/.test(action)) return "\u672A\u77E5\u64CD\u4F5C";
+  if (action === "say") return say(room, actor, payload);
   engine.act(room, actor, action, payload ?? {});
   touch(room);
   return null;
@@ -4308,6 +4392,7 @@ function buildView(room, token, asWatcher = false) {
     ...p,
     connected: now - p.lastSeen < PLAYER_OFFLINE_MS
   }));
+  const spectatingHost = !!me?.isHost && (room.hostPlays === false || room.judgeMode === "human" && room.refereeId === me.id);
   const view = {
     code: room.code,
     seq: room.seq,
@@ -4320,17 +4405,18 @@ function buildView(room, token, asWatcher = false) {
     serverNow: now,
     judgeMode: room.judgeMode,
     refereeId: room.refereeId,
+    hostPlays: room.hostPlays,
     role,
     me: me ? players.find((p) => p.id === me.id) ?? null : null,
     players,
     events: room.events.slice(-14),
     finished: room.finished,
     publicData: engine.publicData(room),
-    secret: me && !asWatcher ? engine.secretFor(room, me) : {},
+    secret: me && !asWatcher && !spectatingHost ? engine.secretFor(room, me) : {},
     referee: isRefereeViewer(room, me) ? engine.refereeExtra(room) : null,
     needs: { prompt: null, input: "none", inputHint: "", submitted: false, hostHint: "" }
   };
-  view.needs = engine.needs(room, role === "watcher" ? null : me, view);
+  view.needs = engine.needs(room, role === "watcher" || spectatingHost ? null : me, view);
   return view;
 }
 function markSeen(room, token, now = Date.now()) {
@@ -4389,6 +4475,10 @@ async function joinRoute(b) {
   const loaded = await loadRoom(code);
   if (!loaded) return bad(404, "\u627E\u4E0D\u5230\u8FD9\u4E2A\u623F\u95F4\uFF0C\u68C0\u67E5\u4E00\u4E0B\u623F\u95F4\u53F7");
   if (loaded.room.phase !== "lobby") return bad(400, "\u8FD9\u5C40\u5DF2\u7ECF\u5F00\u59CB\u4E86\uFF0C\u7B49\u4E0B\u4E00\u5C40\u518D\u52A0\u5165\u5427");
+  const meta = GAME_BY_ID[loaded.room.gameId];
+  if (meta && loaded.room.players.length >= meta.maxPlayers) {
+    return bad(400, `\u8FD9\u4E2A\u623F\u95F4\u6EE1\u4E86\uFF08${meta.name} \u6700\u591A ${meta.maxPlayers} \u4EBA\uFF09\uFF0C\u8BA9\u623F\u4E3B\u518D\u5F00\u4E00\u5C40`);
+  }
   return bad(400, "\u540D\u5B57\u4E0D\u592A\u5BF9\uFF0C\u6362\u4E00\u4E2A\u8BD5\u8BD5");
 }
 async function viewRoute(code, token, watch = false) {
@@ -4420,9 +4510,10 @@ async function nextRoute(code, token, force = false) {
   return ok({ error: result.value, view: buildView(result.room, token) });
 }
 async function configureRoute(code, token, opts) {
+  const game = opts?.game && typeof opts.game === "object" && !Array.isArray(opts.game) ? opts.game : void 0;
   const result = await mutateRoom(normalize(code), (room) => {
     if (!room.players.some((p) => p.id === token && p.isHost)) return { denied: true, error: null };
-    return { denied: false, error: configureRoom(room, opts) };
+    return { denied: false, error: configureRoom(room, { ...opts, game }) };
   });
   if (!result.ok) return bad(404, result.reason === "conflict" ? "\u8FD9\u4E00\u6B65\u6CA1\u5199\u4E0A\uFF0C\u518D\u70B9\u4E00\u6B21" : "\u623F\u95F4\u4E0D\u5B58\u5728\u6216\u5DF2\u7ED3\u675F");
   if (result.value.denied) return bad(403, "\u53EA\u6709\u623F\u4E3B\u80FD\u8BBE\u7F6E\u88C1\u5224");
@@ -4473,7 +4564,9 @@ function application(deps) {
       return json(
         await configureRoute(code, token, {
           judgeMode: body?.judgeMode === void 0 ? void 0 : body.judgeMode === "human" ? "human" : "ai",
-          refereeId: body?.refereeId === void 0 ? void 0 : body.refereeId === null ? null : String(body.refereeId)
+          refereeId: body?.refereeId === void 0 ? void 0 : body.refereeId === null ? null : String(body.refereeId),
+          hostPlays: body?.hostPlays === void 0 ? void 0 : !!body.hostPlays,
+          game: body?.game
         })
       );
     }
