@@ -6,7 +6,7 @@ import { uiFor } from '../games'
 import { JudgeBadge, QrImage, Seats, Scoreboard, Ticker, Timer } from '../ui/common'
 import { StageView } from '../ui/StageView'
 import { RefereeConsole } from '../ui/RefereeConsole'
-import { joinHref, shareJoinHref } from '../route'
+import { joinHref, phoneHref, shareJoinHref } from '../route'
 import type { RoomView } from '../../shared/types'
 
 export function Host({ code, token, watch }: { code: string; token: string | null; watch?: boolean }) {
@@ -77,6 +77,17 @@ export function Host({ code, token, watch }: { code: string; token: string | nul
                   <a className="btn ghost tiny" href={joinHref(view.code)}>
                     手机加入页
                   </a>
+                  {view.me && (
+                    <a
+                      className="btn ghost tiny"
+                      href={phoneHref(view.code)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="在新标签页打开你自己的玩家页，轮到你时在那里提交"
+                    >
+                      我也玩
+                    </a>
+                  )}
                   {!isOver && (
                     <button
                       className="btn ghost tiny"
@@ -269,6 +280,18 @@ function Lobby({
           <span className="dim">
             最少 {view.meta.minPlayers} 人。现在 {view.players.length} 人 · {Math.round((now / 1000) % 60)}
           </span>
+          {view.me && (
+            <a
+              className="btn ghost tiny"
+              href={phoneHref(view.code)}
+              target="_blank"
+              rel="noreferrer"
+              style={{ marginLeft: 'auto' }}
+              title="在新标签页打开你自己的玩家页，轮到你时在那里提交"
+            >
+              我也玩
+            </a>
+          )}
         </div>
       </div>
 

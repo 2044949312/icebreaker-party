@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { AllGames } from './views/AllGames'
 import { Home } from './views/Home'
 import { Host } from './views/Host'
 import { Join } from './views/Join'
@@ -15,6 +16,8 @@ export function App() {
   }, [])
 
   switch (route.name) {
+    case 'games':
+      return <AllGames />
     case 'join':
       return <Join initialCode={route.code} />
     case 'host':

@@ -4,7 +4,7 @@ import { createRoom } from '../api'
 import { GAME_BY_ID, GAMES } from '../../shared/games'
 import { recommend } from '../../shared/recommend'
 import type { Intimacy, Profile, Setting, Vibe } from '../../shared/types'
-import { go, hostHref, saveToken } from '../route'
+import { gamesHref, go, hostHref, saveToken } from '../route'
 
 const VIBES: { v: Vibe; label: string; hint: string }[] = [
   { v: 'laugh', label: '爆笑', hint: '笑到缺氧，拍照留念' },
@@ -144,6 +144,9 @@ export function Home() {
             <p className="lead">回答 8 个问题，替你挑出现在最合适的这一局。</p>
             <button className="btn primary big home-cta" onClick={start}>
               开始匹配 →
+            </button>
+            <button className="btn big home-cta home-browse" onClick={() => go(gamesHref)}>
+              🎮 自己挑 · 所有游戏
             </button>
 
             <div className="home-steps">
@@ -404,9 +407,14 @@ export function Home() {
             <p className="kicker">MATCH RESULT</p>
             <h1 className="result-title">最合适的一局</h1>
           </div>
-          <button type="button" className="btn tiny" onClick={editConditions}>
-            改条件
-          </button>
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn tiny" onClick={() => go(gamesHref)}>
+              所有游戏
+            </button>
+            <button type="button" className="btn tiny" onClick={editConditions}>
+              改条件
+            </button>
+          </div>
         </header>
 
         <div className="row result-meta">

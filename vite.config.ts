@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 /** 房间页要能被别的设备直接打开，而 Sites 关掉了目录索引，所以每个路由都要有一个真实 html */
-const ROUTE_PAGES = ['join', 'host', 'p', 'watch']
+const ROUTE_PAGES = ['games', 'join', 'host', 'p', 'watch']
 
 function routePages(): Plugin {
   const pattern = new RegExp(`^/(${ROUTE_PAGES.join('|')})(\\.html)?$`)

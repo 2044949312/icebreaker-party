@@ -2,6 +2,7 @@
 
 export type Route =
   | { name: 'home' }
+  | { name: 'games' }
   | { name: 'join'; code: string }
   | { name: 'host'; code: string }
   | { name: 'phone'; code: string }
@@ -13,6 +14,7 @@ export function parse(): Route {
   const path = (location.pathname.replace(/\.html$/, '').replace(/\/+$/, '') || '/') as string
   const q = new URLSearchParams(location.search)
   const code = (q.get('c') ?? '').toUpperCase()
+  if (path === '/games') return { name: 'games' }
   if (path === '/join') return { name: 'join', code }
   if (path === '/host' && code) return { name: 'host', code }
   if (path === '/p' && code) return { name: 'phone', code }
@@ -55,6 +57,11 @@ export function saveToken(code: string, token: string) {
 export const joinHref = (code: string) => `${location.origin}/join.html?c=${code.toUpperCase()}`
 
 export const hostHref = (code: string) => `/host.html?c=${code.toUpperCase()}`
+
+export const gamesHref = '/games.html'
+
+/** 房主自己也是玩家时，打开本人的手机玩家页（私密输入，不上投屏） */
+export const phoneHref = (code: string) => `/p?c=${code.toUpperCase()}`
 
 /** 下面两个是给「别的设备」看的地址，所以用服务端算出来的可访问 base */
 export const shareJoinHref = (code: string, base: string | null) =>
